@@ -1,4 +1,8 @@
-//! The RGBA8888 frame the painter draws into, and the two operations it needs.
+//! The RGBA8888 frame the painter draws into, and the pixel loops it needs.
+//!
+//! Everything works on whole rows (`&mut [u8]`) and four-byte chunks, not on indexes computed per
+//! pixel: the frame is 5.4 MP, so a few nanoseconds per pixel is the difference between 3 fps and
+//! 30.
 
 use egui::Color32;
 
@@ -21,12 +25,11 @@ impl Target<'_> {
     }
 }
 
-/// The pixel loop, kept apart from the geometry so it can be tightened later without touching the
-/// rasteriser.
 pub(crate) struct Canvas<'a> {
     pixels: &'a mut [u8],
     width: usize,
     height: usize,
+    stride: usize,
 }
 
 impl<'a> Canvas<'a> {
@@ -34,37 +37,33 @@ impl<'a> Canvas<'a> {
         if !target.is_consistent() {
             return None;
         }
-        Some(Self { pixels: target.pixels, width: target.width as usize, height: target.height as usize })
+        let width = target.width as usize;
+        Some(Self { pixels: target.pixels, width, height: target.height as usize, stride: width * 4 })
     }
 
-    fn row(&mut self, y: usize, x: usize) -> Option<&mut [u8]> {
-        let index = y.checked_mul(self.width)?.checked_add(x)?.checked_mul(4)?;
-        self.pixels.get_mut(index..index.checked_add(4)?)
+    pub(crate) fn width(&self) -> usize {
+        self.width
     }
 
-    /// One premultiplied "source over" pixel.
+    pub(crate) fn height(&self) -> usize {
+        self.height
+    }
+
+    /// One row as whole pixels. `None` when the row is off the frame.
     #[inline]
-    pub(crate) fn blend(&mut self, x: usize, y: usize, src: Color32) {
-        let alpha = src.a();
-        if alpha == 0 || x >= self.width || y >= self.height {
-            return;
+    pub(crate) fn row(&mut self, y: usize) -> Option<&mut [[u8; 4]]> {
+        if y >= self.height {
+            return None;
         }
-        let Some(dst) = self.row(y, x) else { return };
-        if alpha == 255 {
-            dst.copy_from_slice(&src.to_array());
-            return;
-        }
-        let inverse = 255 - alpha as u32;
-        for (channel, out) in dst.iter_mut().enumerate() {
-            let over = (src.to_array()[channel] as u32) + (u32::from(*out) * inverse + 127) / 255;
-            *out = over.min(255) as u8;
-        }
+        let start = y.checked_mul(self.stride)?;
+        let end = start.checked_add(self.stride)?;
+        self.pixels.get_mut(start..end).map(|row| row.as_chunks_mut::<4>().0)
     }
 
     /// The same colour across a span: the fast path for the rectangles a UI is made of.
     #[inline]
     pub(crate) fn blend_span(&mut self, y: usize, x0: usize, x1: usize, src: Color32) {
-        if y >= self.height {
+        if src.a() == 0 {
             return;
         }
         let x0 = x0.min(self.width);
@@ -72,18 +71,68 @@ impl<'a> Canvas<'a> {
         if x1 <= x0 {
             return;
         }
-        if src.a() == 255 {
-            // Opaque: write the four bytes straight through, row-wise.
-            let colour = src.to_array();
-            for x in x0..x1 {
-                if let Some(dst) = self.row(y, x) {
-                    dst.copy_from_slice(&colour);
-                }
+        let colour = src.to_array();
+        let Some(row) = self.row(y) else { return };
+        let Some(span) = row.get_mut(x0..x1) else { return };
+        if colour[3] == 255 {
+            for px in span.iter_mut() {
+                *px = colour;
             }
+        } else {
+            for px in span.iter_mut() {
+                over(px, colour);
+            }
+        }
+    }
+
+    /// Copy whole pixels from a texture row, replacing the destination (an opaque blit).
+    ///
+    /// `src` holds `count` RGBA texels; the destination must already be clipped to the row.
+    #[inline]
+    pub(crate) fn blit_row(&mut self, y: usize, x0: usize, src: &[[u8; 4]], opaque: bool) {
+        let count = src.len();
+        if count == 0 {
             return;
         }
-        for x in x0..x1 {
-            self.blend(x, y, src);
+        let x0 = x0.min(self.width);
+        let x1 = (x0 + count).min(self.width);
+        if x1 <= x0 {
+            return;
         }
+        let Some(row) = self.row(y) else { return };
+        let Some(span) = row.get_mut(x0..x1) else { return };
+        if opaque {
+            span.copy_from_slice(&src[..x1 - x0]);
+        } else {
+            for (px, texel) in span.iter_mut().zip(src.iter()) {
+                over(px, *texel);
+            }
+        }
+    }
+
+    /// Write one pixel's texel where the texture already understands blending (glyphs and images).
+    #[inline]
+    pub(crate) fn put(&mut self, x: usize, y: usize, texel: [u8; 4]) {
+        if texel[3] == 0 || x >= self.width {
+            return;
+        }
+        let Some(row) = self.row(y) else { return };
+        let Some(px) = row.get_mut(x) else { return };
+        over(px, texel);
+    }
+}
+
+/// Premultiplied "source over": `out = src + dst * (1 - src.a)`.
+#[inline]
+fn over(dst: &mut [u8; 4], src: [u8; 4]) {
+    let a = u32::from(src[3]);
+    if a == 255 {
+        *dst = src;
+        return;
+    }
+    let inverse = 255 - a;
+    for i in 0..4 {
+        let value = u32::from(src[i]) + (u32::from(dst[i]) * inverse + 127) / 255;
+        dst[i] = value.min(255) as u8;
     }
 }

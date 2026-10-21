@@ -14,7 +14,7 @@ mod config;
 mod input;
 pub mod logging;
 
-pub use app::{App, FrameNeeded};
+pub use app::{App, FrameNeeded, FrameTimings};
 pub use config::{Config, Start, Theme};
 pub use input::{Button, KeyEvent, PointerKind, Scroll, egui_key, modifiers};
 

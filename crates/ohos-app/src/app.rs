@@ -35,6 +35,17 @@ pub enum FrameNeeded {
     Yes,
 }
 
+/// Where the last frame's time went, for the host renderer and the device's log.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameTimings {
+    /// The UI pass: layout, painting into egui's shapes, and the app's own logic.
+    pub ui_ms: f32,
+    /// Turning shapes into meshes.
+    pub tessellate_ms: f32,
+    /// Rasterising the meshes into the frame.
+    pub paint_ms: f32,
+}
+
 /// Everything the shell drives.
 pub struct App {
     config: Config,
@@ -59,6 +70,7 @@ pub struct App {
     typed: String,
     composing: bool,
     scrolled: (f32, f32),
+    timings: FrameTimings,
 }
 
 impl App {
@@ -95,6 +107,7 @@ impl App {
             typed: String::new(),
             composing: false,
             scrolled: (0.0, 0.0),
+            timings: FrameTimings::default(),
             config,
             notes,
         };
@@ -339,12 +352,15 @@ impl App {
         }
 
         let raw = self.take_raw_input();
+        let had_input = !raw.events.is_empty();
         let ctx = self.ctx.clone();
         let ui = &mut self.ui;
+        let started = Instant::now();
         let output = ctx.run_ui(raw, |root| {
             ui.logic(root.ctx());
             ui.ui(root);
         });
+        let ui_ms = started.elapsed().as_secs_f32() * 1000.0;
 
         // Textures must land before the meshes that sample them, and the delta must be emptied
         // once applied (egui's Drop asserts on leftovers).
@@ -352,10 +368,26 @@ impl App {
         self.painter.apply_textures(&textures);
         textures.clear();
 
+        // Nothing moved and egui asks for no repaint: the previous frame is still on screen, so
+        // there is nothing to rasterise. (The UI pass above is ~1 ms; a painted frame is the
+        // expensive one.)
+        // A delay of "never" or "later" means egui is happy with what is on screen; only an
+        // immediate repaint (an animation, a caret blink landing) needs a new frame now.
+        let wants_paint = had_input || output.viewport_output.get(&egui::ViewportId::ROOT).is_none_or(|v| v.repaint_delay.is_zero());
+        if self.frames > 0 && !wants_paint {
+            self.timings = FrameTimings { ui_ms, tessellate_ms: 0.0, paint_ms: 0.0 };
+            return FrameNeeded::No;
+        }
+
         let pixels_per_point =
             if output.pixels_per_point.is_finite() && output.pixels_per_point > 0.0 { output.pixels_per_point } else { self.density };
+        let tessellating = Instant::now();
         let primitives = ctx.tessellate(output.shapes, pixels_per_point);
+        let tessellate_ms = tessellating.elapsed().as_secs_f32() * 1000.0;
+        let painting = Instant::now();
         self.painter.paint(Target { pixels: &mut self.pixels, width: self.width, height: self.height }, pixels_per_point, &primitives);
+        let paint_ms = painting.elapsed().as_secs_f32() * 1000.0;
+        self.timings = FrameTimings { ui_ms, tessellate_ms, paint_ms };
         self.frames = self.frames.saturating_add(1);
         if self.frames.is_multiple_of(300) {
             let stats = self.painter.stats();
@@ -413,6 +445,7 @@ impl App {
             "last": self.last,
             "triangles": stats.triangles,
             "pixels": stats.pixels,
+            "blitted": stats.blitted,
             "textures": self.painter.texture_count(),
         })
         .to_string()
@@ -422,6 +455,11 @@ impl App {
     #[doc(hidden)]
     pub fn pending_events(&self) -> &[Event] {
         &self.raw.events
+    }
+
+    /// Where the last frame's time went.
+    pub fn timings(&self) -> FrameTimings {
+        self.timings
     }
 
     /// Textures the painter is holding (the font atlas, the page tiles), for tests and logs.

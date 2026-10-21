@@ -19,10 +19,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = wordcraft_ohos_app::App::new();
     app.resize(width, height, density);
     // The UI installs its fonts over the first passes (as on the device); the shell keeps drawing.
+    let mut painted = 0usize;
     for _ in 0..frames.max(1) {
-        if app.render() != wordcraft_ohos_app::FrameNeeded::Yes {
-            return Err(format!("no frame drawn at {width}x{height}").into());
+        if app.render() == wordcraft_ohos_app::FrameNeeded::Yes {
+            painted += 1;
         }
+    }
+    if painted == 0 {
+        return Err(format!("no frame drawn at {width}x{height}").into());
     }
 
     let pixels = app.pixels();
@@ -30,12 +34,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     write!(file, "P6\n{width} {height}\n255\n")?;
     // RGBA (premultiplied) → RGB over white, which is what the device compositor does with an
     // opaque surface.
-    for px in pixels.chunks_exact(4) {
+    for px in pixels.as_chunks::<4>().0 {
         let a = u32::from(px[3]);
         let over = |c: u8| ((u32::from(c) * 255 + 255 * (255 - a)) / 255).min(255) as u8;
         file.write_all(&[over(px[0]), over(px[1]), over(px[2])])?;
     }
     file.flush()?;
+    let t = app.timings();
+    println!("last frame: ui {:.1} ms, tessellate {:.1} ms, paint {:.1} ms", t.ui_ms, t.tessellate_ms, t.paint_ms);
+    println!("painted {painted} of {frames} passes (egui skips the frames nothing changed in)");
     println!(
         "{out}: {width}x{height} at {density}x, {} frames, {} triangles, {} textures",
         app.frames(),

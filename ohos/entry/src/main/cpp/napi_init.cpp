@@ -298,13 +298,10 @@ napi_value Key(napi_env env, napi_callback_info info) {
     ReadBool(env, argv[1], pressed);
     ReadBool(env, argv[2], repeated);
     ReadInt(env, argv[3], modifiers);
-    wc_key(code, pressed ? 1 : 0, repeated ? 1 : 0, modifiers);
-    if (pressed) {
-        uint32_t cp = FirstCodepoint(env, argv[4]);
-        if (cp != 0) {
-            wc_text(cp);
-        }
-    }
+    /* The character travels with the key: whether a chord types anything is decided in Rust
+     * (ArkUI's keyText is unreliable while Ctrl is held — Ctrl+S arrives as 'K' on the emulator). */
+    const uint32_t typed = pressed ? FirstCodepoint(env, argv[4]) : 0;
+    wc_key(code, pressed ? 1 : 0, repeated ? 1 : 0, modifiers, typed);
     return Undefined(env);
 }
 
@@ -340,6 +337,37 @@ napi_value Focus(napi_env env, napi_callback_info info) {
     bool focused = false;
     ReadBool(env, argv[0], focused);
     wc_focus(focused ? 1 : 0);
+    return Undefined(env);
+}
+
+/* hostTake() -> the next request for ArkTS (a JSON string), or null */
+napi_value HostTake(napi_env env, napi_callback_info info) {
+    (void)info;
+    const uint8_t *data = wc_host_take();
+    const size_t len = wc_host_take_len();
+    napi_value out = nullptr;
+    if (data == nullptr || len == 0) {
+        napi_get_null(env, &out);
+        return out;
+    }
+    napi_create_string_utf8(env, reinterpret_cast<const char *>(data), len, &out);
+    return out;
+}
+
+/* hostAnswer(id, json) */
+napi_value HostAnswer(napi_env env, napi_callback_info info) {
+    napi_value argv[2];
+    if (!ArgCount(env, info, argv, 2)) {
+        return Undefined(env);
+    }
+    double id = 0;
+    ReadDouble(env, argv[0], id);
+    std::string json;
+    if (!ReadString(env, argv[1], json)) {
+        WC_LOGW("host answer is not a string");
+        return Undefined(env);
+    }
+    wc_host_answer(static_cast<uint64_t>(id), reinterpret_cast<const uint8_t *>(json.data()), json.size());
     return Undefined(env);
 }
 
@@ -406,6 +434,8 @@ napi_value Init(napi_env env, napi_value exports) {
         {"focus", nullptr, Focus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, Render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostTake", nullptr, HostTake, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostAnswer", nullptr, HostAnswer, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"destroy", nullptr, Destroy, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     if (napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc) != napi_ok) {

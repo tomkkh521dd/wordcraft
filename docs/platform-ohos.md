@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (platform services on the device: the system file picker and the clipboard, edited through working copies because a picker grants a file and not its folder — open, save, reopen and paste verified on the emulator; a shortcut no longer types its key text; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -12,11 +12,13 @@ files the port touches**.
 | Part | State |
 |---|---|
 | Core (L0–L5) and the egui UI (L6) compile for both OHOS targets | ✅ done (`cargo xtask ohos`) |
-| Host injection points: system font folders, settings folder | ✅ done |
-| HAP project, C++ shell (NAPI + native window buffer), Rust app | ✅ builds; **first frame verified on the emulator** (see *Verified on the emulator*) |
-| The document UI (egui) on the surface | ⏳ next |
-| Platform services (file picker, clipboard, IME, appearance, locale) | ⏳ planned |
-| Packaging (signed HAP), AppGallery | ⏳ planned |
+| Host injection points: system font folders, settings folder, language, colour mode | ✅ done |
+| HAP project, C++ shell (NAPI + native window buffer), Rust app | ✅ builds and runs on the emulator |
+| The document UI (egui) on the surface | ✅ done: ribbon, ruler, pages, tables, lists, status bar |
+| Platform services: system font folders, locale, dark mode | ✅ done |
+| Platform services: file picker (open, save), clipboard (text, HTML, pictures) | ✅ done and verified on the emulator (see *Platform services*) |
+| Input method (soft keyboard, Chinese IME, candidate window) | ⏳ next (OHOS.5) |
+| Packaging (signed HAP), AppGallery | ⏳ planned (OHOS.6) |
 
 The desktop shell (`apps/wordcraft`, eframe/winit) is **not** used on HarmonyOS: winit has no
 OpenHarmony backend. The HarmonyOS shell draws the same `wordcraft-ui-egui` UI through
@@ -29,6 +31,55 @@ needs from the OS is POSIX (`cfg(unix)` file work, threads, sockets), so the doc
 layout, renderer (`vello_cpu`) and PDF writer build unchanged. Only the *shell* is platform code,
 and it is already swappable: `wordcraft-ui-egui` has no eframe/winit dependency, and every OS
 service the UI needs goes through `Services` (`crates/ui-egui/src/lib.rs`).
+
+## Platform services
+
+The shell pushes values into Rust (surface, input, configuration). Opening a file, reading the
+clipboard and the like need the other direction: Rust asks, ArkTS answers. The bridge is
+`crates/ohos-app/src/host.rs`:
+
+- Rust queues a JSON request (`{"id": 7, "kind": "pickOpen", "purpose": "document"}`) and keeps a
+  channel for the answer, with a deadline so a dialog that never answers cannot leak a caller.
+- ArkTS polls `native.hostTake()` once per frame (it already runs a `displaySync` callback) and
+  finishes with `native.hostAnswer(id, json)`, which hands the bytes back through the channel.
+  One request per frame, so a slow picker never blocks the frame the user tapped in.
+- No pointer enters Rust except that one borrowed answer string (`wc_host_answer` is `unsafe` for
+  it, with the contract in `wc_abi.h`).
+
+### Files: the picker grants a file, not its folder
+
+`DocumentViewPicker` returns a URI, and the app's temporary grant covers **that file**. The engine
+writes a document the way every careful editor does — a temporary file beside the destination,
+then a rename — and creating that sibling is refused (`13900012`, permission denied; measured on
+the emulator). Opening the picked file for writing works, so the grant is real; only the folder
+is out of reach.
+
+So the app edits a **working copy** in its sandbox:
+
+- Open: ArkTS copies the picked file into `filesDir/documents/<n>/<name>` and answers that path;
+  the engine opens it, and autosave, recovery and Recent files all work on ordinary paths.
+- Save/Save As: the picker chooses the destination, and the engine writes the working copy.
+- Half a second later (and only when the working copy changed), ArkTS copies it back over the
+  picked URI. Saves, exports and Print-to-PDF all take that route, because they all write files
+  the user chose.
+
+One working copy per opened or saved file, each in its own numbered folder so the file keeps
+exactly the name the user's file has (the title bar shows it).
+
+### Clipboard
+
+Text, HTML and pictures both ways. Reading returns the plain text, the HTML alternative another
+program put there, the MIME types (so "nothing to paste" can say what *is* there) and any copied
+file URIs; a clipboard picture (a `PixelMap`) is packed to a PNG in the app's cache folder and the
+bytes are read (and the file removed) on the Rust side, the same `ClipboardPicture::Encoded` route
+the desktop takes. Writing puts the text and the HTML alternative on the picker-facing clipboard
+in one `PasteData`. HarmonyOS has no MathML clipboard record, so a copied equation arrives in
+other programs as its HTML/text.
+
+Reading another app's clipboard needs `ohos.permission.READ_PASTEBOARD`, a *restricted* user grant
+that AppGallery approves per app; copying and pasting inside WordCraft needs none. Until it is
+granted the app keeps its own last copy in the cache, so in-app copy and paste work and a failed
+read never silently empties the clipboard.
 
 ## The project
 
@@ -126,13 +177,28 @@ HarmonyOS 6.1.1 (API 24, x86_64) tablet emulator, `karl.hmsoft.wordcraft`, 1920�
 
 | What | Result |
 |---|---|
-| Buffer format | stripes read red-green-blue-white: the buffer is RGBA, not BGRA |
-| Stride | the checkerboard's squares stay square |
-| Density | the 10-vp ruler draws ten 15-px squares; a touch at 700,1100 px puts the crosshair there exactly |
-| Input | touch down/move reach the app (`events` climbs), and the pointer is drawn where it was put |
-| Engine | the sample document loads and lays out (41 paragraphs) |
-| System fonts | one folder reported by `font.getUIFontConfig()` |
-| Frames | presented every display refresh (~24 fps for the 5.4 MP test pattern, which repaints every pixel per frame; the real UI will paint rows, not pixels) |
+| The interface | the ribbon in Chinese (harmonyOS ships `HarmonyOS_Sans_SC.ttf`), the ruler, the sample document with a table, numbered and bulleted lists, page numbers and the status bar |
+| Buffer format | stripes read red-green-blue-white during step 2: the buffer is RGBA, not BGRA |
+| Stride | the checkerboard's squares stayed square (step 2) |
+| Density | the 10-vp ruler draws ten 15-px squares; touches land where they are put (a 1920×2799 surface at 1.5×) |
+| Engine | the sample document loads, lays out and draws (41 paragraphs); a saved `.docx` reopens after a restart |
+| System fonts | one folder reported by `font.getUIFontConfig()`, 696 faces catalogued |
+| Frames | 8756 triangles, ~14.9M painted pixels, 9 textures; ui 1.0 ms, tessellate 0.3 ms, paint 50.4 ms per painted frame (~5 fps at 1920×2799 — the rasteriser is the bottleneck) |
+| File picker | Ctrl+O opened `DocumentViewPicker`; a picked `.md` became a working copy; Save/Save As wrote an 11 KB `.docx` into *Documents* that reopened after a restart |
+| Clipboard | Ctrl+C wrote plain text and HTML (`clipboard written (25 text, 68 html chars)`); Ctrl+V read them back (`clipboard read: 2 record(s) … text/html,text/plain`) and pasted the text |
+| Shortcut text | Ctrl+S used to type `K` (ArkUI's `keyText` is unreliable while Ctrl is held); the character now travels with the key and a Ctrl/Meta chord types nothing |
+
+Three things only a device showed, all handled:
+
+- **`BufferHandle.virAddr` is null** on this emulator. The documented CPU path is to `mmap` the
+  buffer's file descriptor for the frame and `munmap` it before `FlushBuffer`; that is what
+  `present.cpp` does.
+- **A different signature cannot replace an installed app.** Installing over a build signed with
+  another certificate fails with `9568332 install sign info inconsistent`; `hdc uninstall
+  karl.hmsoft.wordcraft` first. (DevEco's *Run* installed one such build; the CLI install then
+  needed the uninstall.)
+- **`keyText` is not the key's character while a modifier is held**: Ctrl+S arrives with the text
+  `K`. Rust decides what types, not the platform (see *Platform notes*, Keys).
 
 Two things only a device shows, both handled:
 
@@ -144,20 +210,6 @@ Two things only a device shows, both handled:
   karl.hmsoft.wordcraft` first. (DevEco's *Run* installed one such build; the CLI install then
   needed the uninstall.)
 
-### What the first frame shows
-
-Until the UI lands (next step), the app draws a test pattern
-(`crates/ohos-app/src/test_pattern.rs`) that makes a wrong buffer or input path obvious:
-
-- four stripes, **red, green, blue, white** — blue where red belongs means the buffer is BGRA;
-- a checkerboard — a wrong stride skews the squares into a rhombus;
-- the very top line turns green with focus, grey without;
-- an orange bar that grows with the events received (input reaches the app);
-- one square per paragraph in the sample document (the engine runs on the device) and one cyan
-  square per system font folder the shell reported;
-- a yellow line sweeping across (frames advance), a crosshair at the pointer, and ten 10-vp
-  squares at the bottom left (density).
-
 ## Platform notes
 
 - **Fonts.** Bundled OFL families (`assets/fonts/`) always load. System fonts come from
@@ -167,10 +219,15 @@ Until the UI lands (next step), the app draws a test pattern
   to what the device has.
 - **Settings and logs.** `wordcraft_control_key::set_settings_dir(context.filesDir + "/settings")`
   at start-up; `WORDCRAFT_PROFILE_DIR` still overrides it for isolated runs.
-- **Files.** User documents are picked with `DocumentViewPicker`; the picked URI's temporary
-  grant covers the physical path the app receives, and persistent access for Recent files uses
-  `fileshare.persistPermission`. The engine reads and writes ordinary paths, so saving, autosave
-  and crash recovery (`crates/engine/src/recovery/desktop.rs`) work as on Linux.
+- **Files.** User documents come from `DocumentViewPicker` and are edited through working copies
+  in `filesDir/documents/` (see *Files: the picker grants a file, not its folder*). The engine
+  therefore reads and writes ordinary sandbox paths, so saving, autosave and crash recovery
+  (`crates/engine/src/recovery/desktop.rs`) work as on Linux. The grant lasts for the session;
+  a document kept for the next start would need `fileshare.persistPermission` on its URI.
+- **Keys.** The character a key produced travels with the key (`wc_key(…, text)`), and Rust
+  decides whether it types: a Ctrl or Meta chord never does. ArkUI's `keyText` cannot be trusted
+  while a modifier is held (Ctrl+S arrived as `K`), and a shortcut that types would corrupt the
+  document. Input-method text has its own entry (`wc_text`).
 - **Rendering.** Pages are rasterised on the CPU by `vello_cpu` (`crates/render`); the shell
   composites egui's triangles on the CPU as well and hands finished frames to the native window
   buffer (`OH_NativeWindow_NativeWindowRequestBuffer` → copy → `FlushBuffer`). No GPU context is
@@ -178,13 +235,25 @@ Until the UI lands (next step), the app draws a test pattern
 - **`unsafe`.** Every NAPI and NDK pointer stays in the small C++ layer
   (`ohos/entry/src/main/cpp`). Rust has one exception: exporting a symbol C can find needs
   `#[unsafe(no_mangle)]`, so `apps/wordcraft-ohos` sets `unsafe_code = "deny"` and only its
-  `src/abi.rs` opts out; nothing there dereferences a pointer. `crates/ohos-app` (all the logic)
-  keeps `unsafe_code = "forbid"`.
+  `src/abi.rs` opts out. One export there borrows the shell's answer string (`wc_host_answer`,
+  `unsafe` for that reason, length checked, never kept); nothing else dereferences a pointer.
+  `crates/ohos-app` (all the logic) keeps `unsafe_code = "forbid"`.
 
 ## Known gaps (planned, tracked in [gaps.md](gaps.md))
 
-- Frame rate: about 3 fps at 1920x2799 — the software rasteriser repaints every pixel of every
-  frame. Row-wise fills, a 1:1 blit for page bitmaps and dirty rectangles are the next work.
+- Frame rate: about 5 fps at 1920×2799 (paint 50.4 ms of a painted frame). The software
+  rasteriser is the bottleneck; row-wise fills, a 1:1 blit for page bitmaps and dirty rectangles
+  are the next work.
+- Input method: no `inputMethod.attach` yet, so the soft keyboard and the Chinese IME do not
+  reach the document (OHOS.5). Hardware keys work.
+- Clipboard pictures: the read path (packed PNG) and the paste path are unit-tested, but no device
+  test has pasted a copied picture yet; reading *another* app's clipboard needs the restricted
+  `ohos.permission.READ_PASTEBOARD` grant, which AppGallery approves per app.
+- Pictures dragged from the file manager paste as text (the URIs reach the engine as plain text;
+  the picture-file paste path exists for the desktop).
+- Recent files, autosave and recovery record sandbox paths, not the user's folders; the file name
+  is right, the location is the app's. Persisting the URI (`fileshare.persistPermission`) is part
+  of OHOS.6.
 - Printing: no `craft-print` port; the print UI hides itself (no `print_native` service).
 - Read Aloud: no TTS hook yet.
 - Zotero: needs the Zotero desktop app, which doesn't exist on HarmonyOS.
@@ -195,6 +264,7 @@ Until the UI lands (next step), the app draws a test pattern
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | minor | Platform services: the system file picker and the clipboard through a Rust→ArkTS request bridge; documents are opened and saved through sandbox working copies because a picker grants a file and not its folder (a save's sibling temporary file is refused, `13900012`), with the finished file copied back over the picked URI; open → edit → save → reopen and copy/paste verified on the emulator; Ctrl+S no longer types `K` |
 | 2026-10-21 | minor | Chinese interface on the device: HarmonyOS ships `HarmonyOS_Sans_SC/TC.ttf`, not Noto or Source Han, so the interface CJK fallback found nothing and every label drew as a box; the kana in the Translate icon falls back to Inter's `α` where no face has kana, guarded by a test that sweeps every ribbon icon's characters |
 | 2026-10-21 | minor | First frame verified on the emulator: RGBA order, stride, density, input and the engine all correct; `mmap` needed because `virAddr` is null; a changed signature needs an uninstall first |
 | 2026-10-21 | trivial | Signing: `sign-debug.sh` (own material, or the SDK's OpenHarmony test chain), what a HarmonyOS image refuses, and the UDID a debug profile is bound to |

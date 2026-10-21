@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use egui::{Event, MouseWheelUnit, Pos2, RawInput, Rect, TouchPhase, vec2};
 use wordcraft_engine::Session;
-use wordcraft_ui_egui::{Services, WordApp};
+use wordcraft_ui_egui::WordApp;
 use wordcraft_ui_paint::{Painter, Target};
 
 use crate::config::{Config, Start, Theme};
@@ -89,7 +89,7 @@ impl App {
             Start::Sample => wordcraft_engine::sample::sample_document(),
             Start::Empty => wordcraft_doc::Document::new(),
         };
-        let ui = WordApp::new(Session::new(doc), Services::default());
+        let ui = WordApp::new(Session::new(doc), crate::services::services());
         log::info!("started: {} paragraph(s), {} font folder(s) from the system", ui.session.doc.paragraph_count(), config.font_dirs.len());
         let mut app = Self {
             ctx: egui::Context::default(),
@@ -314,7 +314,11 @@ impl App {
             if mods.is_empty() { "" } else { " " },
             mods
         ));
-        if let Some(c) = event.text.filter(|_| event.pressed) {
+        // Ctrl and Meta make a shortcut, never text: ArkUI's `keyText` is unreliable while a
+        // modifier is held (on the emulator Ctrl+S arrived with the text 'K'), and a shortcut that
+        // types something would corrupt the document.
+        let shortcut = event.modifiers & (modifiers::CTRL | modifiers::META) != 0;
+        if let Some(c) = event.text.filter(|_| event.pressed && !shortcut) {
             self.text(c);
         }
     }

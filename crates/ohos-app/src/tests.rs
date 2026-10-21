@@ -125,6 +125,23 @@ fn a_touch_without_a_button_is_the_primary_button() {
 }
 
 #[test]
+fn a_shortcut_never_types_its_key_text() {
+    // On the HarmonyOS emulator, Ctrl+S arrives with `keyText` "K": the platform's character for
+    // a chorded key is unreliable, and typing it would put a stray letter in the document.
+    let mut app = App::new();
+    app.key(KeyEvent { code: 2035, pressed: true, repeated: false, modifiers: modifiers::CTRL, text: Some('K') });
+    app.key(KeyEvent { code: 2038, pressed: true, repeated: false, modifiers: modifiers::META, text: Some('x') });
+    assert_eq!(app.typed(), "", "a Ctrl or Meta chord types nothing");
+    assert!(!app.pending_events().iter().any(|e| matches!(e, Event::Text(_))));
+    // Without Ctrl or Meta the character still arrives (AltGr-style text stays possible).
+    app.key(KeyEvent { code: 2017, pressed: true, repeated: false, modifiers: modifiers::ALT, text: Some('@') });
+    assert_eq!(app.typed(), "@");
+    // A released key types nothing either.
+    app.key(KeyEvent { code: 2017, pressed: false, repeated: false, modifiers: 0, text: Some('a') });
+    assert_eq!(app.typed(), "@");
+}
+
+#[test]
 fn keys_map_to_egui_and_text_arrives_separately() {
     let mut app = App::new();
     // ArkUI: 2035 = S, 2054 = Enter, 2012 = ArrowUp, 2090 = F1.

@@ -38,7 +38,8 @@ void wc_surface_gone(void);
  * button: 0 primary, 1 secondary, 2 middle, other none. */
 void wc_pointer(int32_t kind, float x, float y, int32_t button, int32_t modifiers);
 void wc_scroll(float dx, float dy);
-void wc_key(int32_t code, int32_t pressed, int32_t repeated, int32_t modifiers);
+/* A key, with the character it produced (0 for none), as a Unicode scalar value. */
+void wc_key(int32_t code, int32_t pressed, int32_t repeated, int32_t modifiers, uint32_t text);
 void wc_text(uint32_t codepoint);
 void wc_ime(int32_t composing);
 void wc_focus(int32_t focused);
@@ -60,6 +61,15 @@ uint32_t wc_damage_x(void);
 uint32_t wc_damage_y(void);
 uint32_t wc_damage_width(void);
 uint32_t wc_damage_height(void);
+
+/* --- the host bridge: Rust asks, ArkTS answers -------------------------------------------- */
+
+/* The next request for ArkTS (UTF-8 JSON), or null. Call wc_host_take_len() *after* this; the bytes
+ * stay valid until the next wc_host_take(). */
+const uint8_t *wc_host_take(void);
+size_t wc_host_take_len(void);
+/* ArkTS's answer: a UTF-8 JSON object, valid for this call only. */
+void wc_host_answer(uint64_t id, const uint8_t *json, size_t len);
 
 uint32_t wc_width(void);
 uint32_t wc_height(void);

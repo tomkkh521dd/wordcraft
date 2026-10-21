@@ -11,12 +11,16 @@
 
 mod app;
 mod config;
+mod host;
 mod input;
 pub mod logging;
+mod services;
 
 pub use app::{App, FrameNeeded, FrameTimings};
 pub use config::{Config, Start, Theme};
+pub use host::{Host, Reply, host};
 pub use input::{Button, KeyEvent, PointerKind, Scroll, egui_key, modifiers};
+pub use services::{clipboard_formats, clipboard_html, clipboard_picture, clipboard_text, set_clipboard_html};
 
 #[cfg(test)]
 mod tests;

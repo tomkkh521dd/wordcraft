@@ -1,8 +1,10 @@
 //! `wc_*`: the functions `ohos/entry/src/main/cpp/wc_abi.h` declares.
 //!
-//! Every function is a thin translation of values onto [`App`]. Nothing here touches a pointer:
-//! the only exports that mention one return the pixel buffer's address, which is safe to create
-//! and is the shell's to copy immediately (see the header's contract).
+//! Every function is a thin translation of values onto [`App`]. Pointers appear in exactly three
+//! places: the two exports that *return* an address (the pixel buffer, and the request ArkTS reads
+//! next), which is safe to create and is the shell's to use immediately, and [`wc_host_answer`],
+//! which borrows the shell's string for the length of the call — `unsafe` for that reason, with
+//! the contract in the header.
 //!
 //! # Threads
 //!
@@ -129,13 +131,16 @@ pub extern "C" fn wc_scroll(dx: f32, dy: f32) {
     with((), |app| app.scroll(Scroll { dx, dy }));
 }
 
-/// A hardware key. `code` is the platform's `KeyCode`; characters arrive through `wc_text`.
+/// A hardware key. `code` is the platform's `KeyCode`; `text` is the character the key produced
+/// (0 for none) — one call, so the decision whether a chord types anything stays in one place
+/// ([`App::key`]).
 #[unsafe(no_mangle)]
-pub extern "C" fn wc_key(code: i32, pressed: i32, repeated: i32, modifiers: i32) {
-    with((), |app| app.key(KeyEvent { code, pressed: pressed != 0, repeated: repeated != 0, modifiers, text: None }));
+pub extern "C" fn wc_key(code: i32, pressed: i32, repeated: i32, modifiers: i32, text: u32) {
+    let typed = char::from_u32(text).filter(|_| text != 0);
+    with((), |app| app.key(KeyEvent { code, pressed: pressed != 0, repeated: repeated != 0, modifiers, text: typed }));
 }
 
-/// One character of typing or input-method text (a Unicode scalar value).
+/// One character of input-method text (a Unicode scalar value).
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_text(codepoint: u32) {
     if let Some(c) = char::from_u32(codepoint) {
@@ -237,6 +242,52 @@ pub extern "C" fn wc_damage_width() -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_damage_height() -> u32 {
     with(0, |app| app.damage_px().3)
+}
+
+// --- the host bridge: requests out, answers in -----------------------------------------------
+
+thread_local! {
+    /// The request last handed to the shell; it must stay alive while ArkTS reads it.
+    static TAKEN: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// The next request for ArkTS as UTF-8, or null. Call [`wc_host_take_len`] *after* this to learn
+/// how long it is; the bytes stay valid until the next call.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_host_take() -> *const u8 {
+    let next = wordcraft_ohos_app::host().take();
+    TAKEN.with(|slot| {
+        let mut slot = match slot.try_borrow_mut() {
+            Ok(slot) => slot,
+            Err(_) => return std::ptr::null(),
+        };
+        *slot = next;
+        slot.as_ref().map_or(std::ptr::null(), |line| line.as_ptr())
+    })
+}
+
+/// The byte length of the request [`wc_host_take`] returned.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_host_take_len() -> usize {
+    TAKEN.with(|slot| slot.try_borrow().ok().and_then(|slot| slot.as_ref().map(String::len)).unwrap_or(0))
+}
+
+/// ArkTS's answer to request `id`: a UTF-8 JSON object. The shell's buffer is valid for this call.
+///
+/// # Safety
+///
+/// `json` must point to `len` readable bytes (the shell's own NAPI string buffer, as
+/// `wc_abi.h` says); nothing here keeps the pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wc_host_answer(id: u64, json: *const u8, len: usize) {
+    if json.is_null() || len == 0 {
+        return;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(json, len) };
+    match std::str::from_utf8(bytes) {
+        Ok(text) => wordcraft_ohos_app::host().answer(id, text),
+        Err(e) => log::warn!("host answer {id} is not UTF-8: {e}"),
+    }
 }
 
 #[unsafe(no_mangle)]

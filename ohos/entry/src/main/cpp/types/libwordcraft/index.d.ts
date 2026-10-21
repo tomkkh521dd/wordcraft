@@ -22,6 +22,11 @@ export const focus: (focused: boolean) => void;
 
 /** 1 when a frame was presented. */
 export const render: () => number;
+/** The next request from the Rust side (a JSON string), or null. Poll it once per frame. */
+export const hostTake: () => string | null;
+/** Answer a request: a JSON object with the result, or `{error}`, or `{cancelled: true}`. */
+export const hostAnswer: (id: number, json: string) => void;
+
 /** A JSON summary for logs (width, height, density, frames, events, paragraphs, fontDirs…). */
 export const stats: () => string;
 export const destroy: () => void;

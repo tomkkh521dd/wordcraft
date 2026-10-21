@@ -1,9 +1,0 @@
-# DevEco Studio and hvigor output (the Rust side's target/ is covered by the root .gitignore).
-/oh_modules
-/.hvigor
-/local.properties
-/.idea
-/*.iml
-oh-package-lock.json5
-**/build/
-**/.cxx/

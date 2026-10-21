@@ -8,3 +8,18 @@ plan/
 /.claude/
 /target-*/
 /craft-fonts/
+
+# DevEco Studio / hvigor outputs (the HarmonyOS project is the repository root)
+/.hvigor/
+/.idea/
+/.deveco/
+/.appanalyzer/
+/.cache/
+/.clangd
+/.clang-tidy
+/local.properties
+oh_modules/
+.cxx/
+oh-package-lock.json5
+/ohos/.hvigor/
+/ohos/entry/build/

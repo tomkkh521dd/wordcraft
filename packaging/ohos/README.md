@@ -23,15 +23,16 @@ packaging/ohos/build-hap.sh release
 ```
 
 `build-hap.sh` runs hvigor with `assembleHap --mode module -p product=default -p buildMode=<mode>`.
-DevEco Studio can build and run the same project by opening `ohos/`: its CMake pick-up reads the
-Rust staticlib from `<repo>/target/<triple>/release/` (or `$WORDCRAFT_TARGET_DIR`).
+The HarmonyOS project is the repository root (that is what DevEco Studio opens); its only module is
+`ohos/entry`. DevEco can build and run the same project: its CMake pick-up reads the Rust staticlib
+from `<repo>/target/<triple>/release/` (or `$WORDCRAFT_TARGET_DIR`).
 
 ## Installing
 
 An unsigned HAP compiles, but installing needs a signature. A HarmonyOS device and emulator only
 trust Huawei's chain, so one of these applies:
 
-1. **DevEco Studio's automatic signing (one click, once per machine).** Open `ohos/`, sign in,
+1. **DevEco Studio's automatic signing (one click, once per machine).** Open the repository root, sign in,
    *File › Project Structure › Signing Configs › Automatically generate signature*. DevEco writes
    the keystore, certificate and **provisioning profile** (bound to the connected devices' UDIDs)
    into `ohos/build-profile.json5`, and `hvigor` then signs `assembleHap` output by itself.

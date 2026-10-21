@@ -1,8 +1,15 @@
 {
   "app": {
+    // Root project so DevEco Studio can open the repository directly; it mirrors
+    // ohos/build-profile.json5 (the standalone project used by packaging/ohos/build-hap.sh)
+    // and points its only module at the existing ohos/entry. Keep the two files in sync.
+    //
     // Signing is per machine: DevEco's "Automatically generate signature" fills this in (the
     // product then names "default" too), and packaging/ohos/sign-debug.sh wires a self-signed
     // material for CI. An entry-less build still compiles an (unsigned) HAP.
+    // Empty here: DevEco's "Automatically generate signature" fills this in for the machine it
+    // runs on (keystore paths and encrypted passwords), and the product then names "default".
+    // That is local material — never commit it.
     "signingConfigs": [],
     "products": [
       {
@@ -30,7 +37,7 @@
   "modules": [
     {
       "name": "entry",
-      "srcPath": "./entry",
+      "srcPath": "./ohos/entry",
       "targets": [
         {
           "name": "default",

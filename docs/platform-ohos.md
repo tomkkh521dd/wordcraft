@@ -33,15 +33,21 @@ service the UI needs goes through `Services` (`crates/ui-egui/src/lib.rs`).
 ## The project
 
 ```
-ohos/                        HarmonyOS project (DevEco Studio opens this folder)
-  AppScope/app.json5         bundleName karl.hmsoft.wordcraft, version, icon
-  entry/src/main/ets/        EntryAbility, the page with the XComponent, input, system info
-  entry/src/main/cpp/        NAPI module, the surface's buffer queue, hilog (no unsafe in Rust)
-  entry/src/main/cpp/types/  the module's .d.ts, so ArkTS sees typed functions
+build-profile.json5          the HarmonyOS project DevEco Studio opens (at the repository root)
+AppScope/app.json5           bundleName karl.hmsoft.wordcraft, version, icon
+hvigorfile.ts, hvigor/       the hvigor build (DevEco's tool)
+ohos/entry/                  the project's only module
+  src/main/ets/              EntryAbility, the page with the XComponent, input, system info
+  src/main/cpp/              NAPI module, the surface's buffer queue, hilog (no unsafe in Rust)
+  src/main/cpp/types/        the module's .d.ts, so ArkTS sees typed functions
+  src/main/resources/        strings, colours, icons, the page list
 apps/wordcraft-ohos/         the C ABI the C++ calls (wc_*), the only `#[unsafe(no_mangle)]` in the port
 crates/ohos-app/             the app: configuration, input, the document session, the frame
-packaging/ohos/              env discovery, build-native.sh, build-hap.sh
+packaging/ohos/              env discovery, build-native.sh, build-hap.sh, sign-debug.sh
 ```
+
+DevEco Studio needs the project at the folder it opens, so the project sits at the repository root
+and its module at `ohos/entry`; nothing else in the repository is HarmonyOS-specific.
 
 ArkTS owns what belongs to the UI framework — the XComponent and its surface lifecycle, input
 events, the display density, the system's fonts, language and colour mode — and passes plain
@@ -100,6 +106,10 @@ packaging/ohos/build-native.sh              # the Rust staticlib for both ABIs
 packaging/ohos/build-hap.sh                 # …then hvigor packages the HAP into dist/release/
 packaging/ohos/build-hap.sh release         # a release HAP
 ```
+
+`build-hap.sh` runs hvigor at the repository root (the project DevEco opens), so DevEco's signing
+material — which it writes into `build-profile.json5` for this machine only — is what signs the
+HAP. That file is tracked without it: do not commit the signing block.
 
 Installing needs a signature from Huawei's chain: DevEco's *Automatically generate signature*
 (once per machine; it also creates the per-bundle provisioning profile that names the connected

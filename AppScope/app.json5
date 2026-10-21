@@ -1,5 +1,6 @@
 {
   "app": {
+    // Mirrors ohos/AppScope/app.json5 (the standalone ohos/ project); keep the two in sync.
     // Own app identity: the desktop builds are ai.storyteller.wordcraft.
     "bundleName": "karl.hmsoft.wordcraft",
     "vendor": "karl.hmsoft",

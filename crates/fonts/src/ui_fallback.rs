@@ -106,6 +106,10 @@ fn candidates(hans: bool, korean: bool) -> Vec<&'static str> {
     } else {
         (
             &[
+                // HarmonyOS NEXT (the device's own interface face; SC holds the hanzi the catalogs
+                // use), then the Linux distributions' Noto/Source Han files.
+                "HarmonyOS_Sans_SC.ttf",
+                "HarmonyOS_Sans_TC.ttf",
                 "noto-cjk/NotoSansCJK-Regular.ttc",
                 "opentype/noto/NotoSansCJK-Regular.ttc",
                 "google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc",
@@ -119,7 +123,14 @@ fn candidates(hans: bool, korean: bool) -> Vec<&'static str> {
                 "truetype/wqy/wqy-zenhei.ttc",
                 "truetype/droid/DroidSansFallbackFull.ttf",
             ],
-            &["noto-cjk/NotoSansCJKjp-Regular.otf", "opentype/noto/NotoSansCJKjp-Regular.otf"],
+            &[
+                // HarmonyOS ships SC/TC, which carry the kana too (no separate JP file on the
+                // emulator image), then the Linux distributions' Noto file.
+                "HarmonyOS_Sans_SC.ttf",
+                "HarmonyOS_Sans_TC.ttf",
+                "noto-cjk/NotoSansCJKjp-Regular.otf",
+                "opentype/noto/NotoSansCJKjp-Regular.otf",
+            ],
             &[
                 "noto-cjk/NotoSansCJKkr-Regular.otf",
                 "opentype/noto/NotoSansCJKkr-Regular.otf",

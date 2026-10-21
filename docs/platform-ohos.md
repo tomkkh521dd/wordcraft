@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -67,6 +67,7 @@ touched, all additively, each marked `// OHOS:` where the change is a branch or 
 | `crates/control-key/src/lib.rs` | `set_settings_dir()`: the app sandbox folder | Only the UI framework knows the sandbox path |
 | `xtask/src/main.rs` | one `match` arm; the command lives in the new `xtask/src/ohos.rs` | — |
 | `xtask/src/layers.rs` | two table entries: `ohos-app` at L6, `ohos` exempt | The layering check requires every crate to be classified |
+| `crates/fonts/src/ui_fallback.rs` | `HarmonyOS_Sans_SC.ttf`/`_TC.ttf` first among the interface CJK fallbacks | Devices ship no Noto/Source Han; without it a Chinese interface drew every label as a missing-glyph mark |
 
 Deliberately **not** changed, because the host can do it instead:
 
@@ -182,6 +183,8 @@ Until the UI lands (next step), the app draws a test pattern
 
 ## Known gaps (planned, tracked in [gaps.md](gaps.md))
 
+- Frame rate: about 3 fps at 1920x2799 — the software rasteriser repaints every pixel of every
+  frame. Row-wise fills, a 1:1 blit for page bitmaps and dirty rectangles are the next work.
 - Printing: no `craft-print` port; the print UI hides itself (no `print_native` service).
 - Read Aloud: no TTS hook yet.
 - Zotero: needs the Zotero desktop app, which doesn't exist on HarmonyOS.
@@ -192,6 +195,7 @@ Until the UI lands (next step), the app draws a test pattern
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-21 | minor | Chinese interface on the device: HarmonyOS ships `HarmonyOS_Sans_SC/TC.ttf`, not Noto or Source Han, so the interface CJK fallback found nothing and every label drew as a box; the kana in the Translate icon falls back to Inter's `α` where no face has kana, guarded by a test that sweeps every ribbon icon's characters |
 | 2026-10-21 | minor | First frame verified on the emulator: RGBA order, stride, density, input and the engine all correct; `mmap` needed because `virAddr` is null; a changed signature needs an uninstall first |
 | 2026-10-21 | trivial | Signing: `sign-debug.sh` (own material, or the SDK's OpenHarmony test chain), what a HarmonyOS image refuses, and the UDID a debug profile is bound to |
 | 2026-10-21 | minor | Step 2: HAP project, C++ shell (NAPI, native window buffer, hilog), Rust app with configuration and input, test pattern; unsigned HAP builds for arm64 and x86_64 |

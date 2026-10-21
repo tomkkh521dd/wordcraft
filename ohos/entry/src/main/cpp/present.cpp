@@ -102,7 +102,7 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
     }
     if (dst == nullptr || handle->stride <= 0 || handle->width <= 0 || handle->height <= 0) {
         if (!warnedGeometry_) {
-            WC_LOGE("buffer is not writable: %{public)dx%{public}d stride %{public}d size %{public}d fd %{public}d virAddr %{public}d",
+            WC_LOGE("buffer is not writable: %{public}dx%{public}d stride %{public}d size %{public}d fd %{public}d virAddr %{public}d",
                     handle->width, handle->height, handle->stride, handle->size, handle->fd, handle->virAddr == nullptr ? 0 : 1);
             warnedGeometry_ = true;
         }

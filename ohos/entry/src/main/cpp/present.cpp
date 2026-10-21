@@ -160,7 +160,7 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
     }
 
     // Tell the compositor which part to pick up.
-    Region::Rect dirty{copyX, copyY, copyW, copyH};
+    Region::Rect dirty{static_cast<int32_t>(copyX), static_cast<int32_t>(copyY), copyW, copyH};
     Region region{&dirty, 1};
     ret = OH_NativeWindow_NativeWindowFlushBuffer(window_, buffer, fence, region);
     if (ret != 0) {

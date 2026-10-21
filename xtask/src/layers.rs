@@ -49,7 +49,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("mcp", Class::Layer(5)),
     ("zotero", Class::Layer(5)),
     ("ui-egui", Class::Layer(6)),
-    // The HarmonyOS app's logic (egui UI, surface, input) and its C ABI crate.
+    // The HarmonyOS port's software rasteriser for egui (no GPU on the device) and the app itself.
+    ("ui-paint", Class::Layer(6)),
     ("ohos-app", Class::Layer(6)),
     ("testkit", Class::Testkit),
     // apps and tooling
@@ -64,7 +65,7 @@ pub const TABLE: &[(&str, Class)] = &[
 /// The L0 foundation is a small chain: `raster` builds on `color` and
 /// `geom`, which the §3 diagram draws on one line. The GPU backend (`gpu`)
 /// reuses the CPU reference (`compose`) for LUTs and parity tests.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["doc", "fonts"]];
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["doc", "fonts"], &["ui-paint", "ui-egui", "ohos-app"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));

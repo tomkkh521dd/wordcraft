@@ -25,3 +25,4 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 wordcraft-ohos-app = { path = "../../crates/ohos-app" }
+log = { workspace = true }

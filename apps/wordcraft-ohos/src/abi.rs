@@ -3,53 +3,90 @@
 //! Every function is a thin translation of values onto [`App`]. Nothing here touches a pointer:
 //! the only exports that mention one return the pixel buffer's address, which is safe to create
 //! and is the shell's to copy immediately (see the header's contract).
+//!
+//! # Threads
+//!
+//! The UI is not `Send` (egui's state and `wordcraft-ui-egui`'s services hold `Rc`s), and it does
+//! not need to be: ArkTS runs the NAPI callbacks and the `displaySync` frame callback on its UI
+//! thread. The app therefore lives in a thread-local, and a call from any other thread is logged
+//! and ignored instead of panicking — a wrong thread is a bug in the shell, not a reason to lose
+//! someone's document.
 #![allow(unsafe_code)]
 
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::ThreadId;
 
 use wordcraft_ohos_app::logging::Sink;
 use wordcraft_ohos_app::{App, Button, FrameNeeded, KeyEvent, PointerKind, Scroll};
 
-/// The app, with the global the shell talks to. `None` before `wc_app_new` and after
-/// `wc_app_free`.
-static APP: OnceLock<Mutex<Option<App>>> = OnceLock::new();
-
-fn slot() -> &'static Mutex<Option<App>> {
-    APP.get_or_init(|| Mutex::new(None))
+thread_local! {
+    /// The app, owned by the thread that created it (the ArkTS UI thread).
+    static APP: RefCell<Option<App>> = const { RefCell::new(None) };
 }
 
-/// Run `f` against the app when there is one, `default` otherwise. A poisoned lock means an
-/// earlier call panicked, so the app is treated as gone rather than panicking again.
+/// The thread that created the app; every other call is refused.
+static OWNER: OnceLock<ThreadId> = OnceLock::new();
+/// Set once, so a wrong-thread call is reported once rather than every frame.
+static WARNED: AtomicBool = AtomicBool::new(false);
+
+/// Run `f` on the app when this is its thread and it exists; `default` otherwise.
 fn with<R>(default: R, f: impl FnOnce(&mut App) -> R) -> R {
-    let Ok(mut guard) = slot().lock() else {
-        return default;
-    };
-    match guard.as_mut() {
-        Some(app) => f(app),
-        None => default,
+    let me = std::thread::current().id();
+    match OWNER.get() {
+        Some(owner) if *owner == me => {}
+        Some(owner) => {
+            if !WARNED.swap(true, Ordering::Relaxed) {
+                log::error!("wc_* called from {me:?} but the app belongs to {owner:?}: ignored");
+            }
+            return default;
+        }
+        None => return default,
     }
+    // A re-entrant call (a log message from inside a frame) would find the cell borrowed: answer
+    // with the default rather than panicking.
+    let mut f = Some(f);
+    APP.try_with(|cell| {
+        let mut slot = cell.try_borrow_mut().ok()?;
+        let app = slot.as_mut()?;
+        f.take().map(|f| f(app))
+    })
+    .ok()
+    .flatten()
+    .unwrap_or(default)
 }
 
 /// Create the app and open the document the environment asks for. `0` when running (a second call
 /// keeps the existing document), `-1` when the state itself is unusable.
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_app_new() -> i32 {
-    let mut guard = match slot().lock() {
-        Ok(guard) => guard,
-        Err(_) => return -1,
-    };
-    if guard.is_none() {
-        *guard = Some(App::new());
+    let me = std::thread::current().id();
+    if let Some(owner) = OWNER.get()
+        && *owner != me
+    {
+        log::error!("wc_app_new called from {me:?} but the app belongs to {owner:?}: ignored");
+        return -1;
     }
-    0
+    let _ = OWNER.set(me);
+    APP.try_with(|cell| {
+        let Ok(mut slot) = cell.try_borrow_mut() else { return -1 };
+        if slot.is_none() {
+            *slot = Some(App::new());
+        }
+        0
+    })
+    .unwrap_or(-1)
 }
 
 /// Close the document and free everything the app holds.
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_app_free() {
-    if let Ok(mut guard) = slot().lock() {
-        *guard = None;
-    }
+    let _ = APP.try_with(|cell| {
+        if let Ok(mut slot) = cell.try_borrow_mut() {
+            *slot = None;
+        }
+    });
 }
 
 /// Where `log` records go (hilog on device). `null` drops them.
@@ -112,8 +149,8 @@ pub extern "C" fn wc_ime(composing: i32) {
     with((), |app| app.ime_composing(composing != 0));
 }
 
-/// Draw a frame into the app's buffer. `1` when there is something to present, `0` when there is
-/// no surface (or one too large to be real).
+/// Run one UI pass and paint it into the app's buffer. `1` when there is a frame to present, `0`
+/// when there is no surface (or one too large to be real).
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_render() -> i32 {
     with(0, |app| if app.render() == FrameNeeded::Yes { 1 } else { 0 })

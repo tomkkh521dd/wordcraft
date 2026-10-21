@@ -1,16 +1,19 @@
-//! The app: surface, input, configuration, the document session and the frame to present.
+//! The app: the real WordCraft UI, on a surface, without a window system.
 //!
-//! Step 2 of the port draws [`test_pattern`] instead of the document, so a wrong buffer format,
-//! stride, density or input path is visible on the device at a glance. From step 3 the same state
-//! drives `wordcraft-ui-egui`; nothing here has to change for that.
+//! ArkTS reports the surface size, the display density, input and focus; C++ hands them over the C
+//! ABI; here they become [`egui::RawInput`]. `wordcraft-ui-egui` draws into an [`egui::Context`]
+//! exactly as it does on the desktop, and [`wordcraft_ui_paint::Painter`] rasterises the result
+//! into the RGBA frame C++ copies into the window buffer.
 
 use std::time::Instant;
 
+use egui::{Event, MouseWheelUnit, Pos2, RawInput, Rect, TouchPhase, vec2};
 use wordcraft_engine::Session;
+use wordcraft_ui_egui::{Services, WordApp};
+use wordcraft_ui_paint::{Painter, Target};
 
-use crate::config::{Config, Start};
-use crate::input::{Button, KeyEvent, PointerKind, Scroll, modifiers};
-use crate::test_pattern;
+use crate::config::{Config, Start, Theme};
+use crate::input::{self, Button, KeyEvent, PointerKind, Scroll, modifiers};
 
 /// Sizes are clamped before any buffer is allocated: a surface reports whatever the compositor
 /// says, and a hostile or buggy value must not become a huge allocation.
@@ -22,6 +25,8 @@ const MIN_DENSITY: f32 = 0.5;
 const MAX_DENSITY: f32 = 8.0;
 /// Input coordinates are vp from the platform: finite, and within a sane range of any display.
 const MAX_COORD: f32 = 1.0e6;
+/// What egui allows for a texture (the font atlas grows well past 2048 on a big UI).
+const MAX_TEXTURE_SIDE: usize = 8192;
 
 /// Whether the app drew a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,9 +39,11 @@ pub enum FrameNeeded {
 pub struct App {
     config: Config,
     notes: Vec<String>,
-    /// The open document. Step 3 lays this out and paints it; for now its paragraph count is on
-    /// the test pattern, which proves the engine runs on the device.
-    session: Session,
+    ctx: egui::Context,
+    ui: WordApp,
+    painter: Painter,
+    /// Input collected between frames, handed to egui with the next one.
+    raw: RawInput,
     started: Instant,
     width: u32,
     height: u32,
@@ -45,9 +52,9 @@ pub struct App {
     frames: u64,
     events: u64,
     focused: bool,
-    pointer: Option<(f32, f32)>,
+    pointer: Option<Pos2>,
     pointer_down: bool,
-    pointer_button: Button,
+    modifiers_state: egui::Modifiers,
     last: String,
     typed: String,
     composing: bool,
@@ -66,12 +73,13 @@ impl App {
             Start::Sample => wordcraft_engine::sample::sample_document(),
             Start::Empty => wordcraft_doc::Document::new(),
         };
-        let session = Session::new(doc);
-        log::info!("started: {} paragraph(s), {} font folder(s) from the system", session.doc.paragraph_count(), config.font_dirs.len());
-        Self {
-            config,
-            notes,
-            session,
+        let ui = WordApp::new(Session::new(doc), Services::default());
+        log::info!("started: {} paragraph(s), {} font folder(s) from the system", ui.session.doc.paragraph_count(), config.font_dirs.len());
+        let mut app = Self {
+            ctx: egui::Context::default(),
+            ui,
+            painter: Painter::new(),
+            raw: RawInput::default(),
             started: Instant::now(),
             width: 0,
             height: 0,
@@ -82,12 +90,16 @@ impl App {
             focused: true,
             pointer: None,
             pointer_down: false,
-            pointer_button: Button::Primary,
+            modifiers_state: egui::Modifiers::default(),
             last: "none".into(),
             typed: String::new(),
             composing: false,
             scrolled: (0.0, 0.0),
-        }
+            config,
+            notes,
+        };
+        app.raw.max_texture_side = Some(MAX_TEXTURE_SIDE);
+        app
     }
 
     pub fn config(&self) -> &Config {
@@ -129,7 +141,7 @@ impl App {
 
     /// The open document's paragraph count.
     pub fn paragraphs(&self) -> usize {
-        self.session.doc.paragraph_count()
+        self.ui.session.doc.paragraph_count()
     }
 
     /// How many system font folders the shell reported.
@@ -143,6 +155,15 @@ impl App {
 
     pub fn pressed(&self) -> bool {
         self.pointer_down
+    }
+
+    /// What was typed since start-up.
+    pub fn typed(&self) -> &str {
+        &self.typed
+    }
+
+    pub fn composing(&self) -> bool {
+        self.composing
     }
 
     /// The frame's bytes, RGBA8888, `width * 4` per row. Valid until the next call.
@@ -202,34 +223,69 @@ impl App {
 
     /// A pointer (touch, pen or mouse) event at `x`, `y` in vp.
     pub fn pointer(&mut self, kind: PointerKind, x: f32, y: f32, button: Button, mods: i32) {
-        let (x, y) = (sane(x), sane(y));
+        let pos = Pos2::new(sane(x), sane(y));
+        self.modifiers_state = modifiers::egui(mods);
         match kind {
             PointerKind::Down => {
-                self.pointer = Some((x, y));
+                self.pointer = Some(pos);
                 self.pointer_down = true;
-                self.pointer_button = button;
+                // A press moves the pointer first, so hover-based widgets (the ribbon) see it.
+                self.raw.events.push(Event::PointerMoved(pos));
+                self.raw.events.push(Event::PointerButton { pos, button: button.egui(), pressed: true, modifiers: self.modifiers_state });
             }
             PointerKind::Up => {
-                self.pointer = Some((x, y));
+                self.pointer = Some(pos);
                 self.pointer_down = false;
+                self.raw.events.push(Event::PointerButton { pos, button: button.egui(), pressed: false, modifiers: self.modifiers_state });
             }
-            PointerKind::Move => self.pointer = Some((x, y)),
+            PointerKind::Move => {
+                self.pointer = Some(pos);
+                self.raw.events.push(Event::PointerMoved(pos));
+            }
             PointerKind::Leave | PointerKind::Cancel => {
                 self.pointer = None;
                 self.pointer_down = false;
+                self.raw.events.push(Event::PointerGone);
             }
         }
         let mods = modifiers::describe(mods);
-        self.count(format!("pointer {} {} at ({x:.1}, {y:.1}){}{}", kind.as_str(), button.as_str(), if mods.is_empty() { "" } else { " " }, mods));
+        self.count(format!(
+            "pointer {} {} at ({:.1}, {:.1}){}{}",
+            kind.as_str(),
+            button.as_str(),
+            pos.x,
+            pos.y,
+            if mods.is_empty() { "" } else { " " },
+            mods
+        ));
     }
 
+    /// A scroll gesture in vp, positive down and right (ArkUI's axis sign; egui's wheel is the
+    /// same, positive down).
     pub fn scroll(&mut self, scroll: Scroll) {
         let (dx, dy) = (sane(scroll.dx), sane(scroll.dy));
         self.scrolled = (self.scrolled.0 + dx, self.scrolled.1 + dy);
-        self.count(format!("scroll ({dx:.1}, {dy:.1}) total ({:.1}, {:.1})", self.scrolled.0, self.scrolled.1));
+        self.raw.events.push(Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: vec2(dx, dy),
+            phase: TouchPhase::Move,
+            modifiers: self.modifiers_state,
+        });
+        self.count(format!("scroll ({dx:.1}, {dy:.1})"));
     }
 
+    /// A hardware key. The character it produced arrives as a [`Self::text`] call from the shell.
     pub fn key(&mut self, event: KeyEvent) {
+        self.modifiers_state = modifiers::egui(event.modifiers);
+        if let Some(key) = input::egui_key(event.code) {
+            self.raw.events.push(Event::Key {
+                key,
+                physical_key: None,
+                pressed: event.pressed,
+                repeat: event.repeated,
+                modifiers: self.modifiers_state,
+            });
+        }
         let mods = modifiers::describe(event.modifiers);
         self.count(format!(
             "key {} {}{}{}{}",
@@ -246,70 +302,100 @@ impl App {
 
     /// Text from the keyboard or the input method.
     pub fn text(&mut self, c: char) {
-        // A long paste is fine; the string is only for the log and the diagnostics screen.
         if self.typed.len() < 4096 {
             self.typed.push(c);
         }
+        self.raw.events.push(Event::Text(c.to_string()));
         self.count(format!("text {c:?}"));
     }
 
-    /// The input method started or finished composing (the composed text arrives through
-    /// [`Self::text`]).
+    /// The input method started or finished composing. The committed text arrives through
+    /// [`Self::text`]; the preedit (candidate) text has no channel yet, so nothing is drawn for it
+    /// until the IME bridge is built.
     pub fn ime_composing(&mut self, composing: bool) {
         self.composing = composing;
         self.count(format!("ime {}", if composing { "composing" } else { "committed" }));
     }
 
-    /// What was typed since start-up (the diagnostics screen shows a line of it).
-    pub fn typed(&self) -> &str {
-        &self.typed
-    }
-
-    pub fn composing(&self) -> bool {
-        self.composing
-    }
-
     fn count(&mut self, what: String) {
         self.events = self.events.saturating_add(1);
-        if self.events.is_multiple_of(120) {
+        if self.events <= 40 || self.events.is_multiple_of(120) {
             log::debug!("{what}");
         }
         self.last = what;
     }
 
-    /// Draw the frame into the pixel buffer. `Yes` when there is something to present.
+    /// Run one UI pass and paint it. `Yes` when there is something to present.
     pub fn render(&mut self) -> FrameNeeded {
         if self.width == 0 || self.height == 0 {
             return FrameNeeded::No;
         }
-        if self.pixels.len() != self.stride().saturating_mul(usize::try_from(self.height).unwrap_or(0)) {
+        let expected = self.stride().saturating_mul(usize::try_from(self.height).unwrap_or(0));
+        if self.pixels.len() != expected {
             self.resize_buffer();
+            if self.pixels.len() != expected {
+                return FrameNeeded::No;
+            }
         }
-        let density = self.density;
-        let view = test_pattern::View {
-            time_s: self.elapsed_s(),
-            density,
-            frames: self.frames,
-            events: self.events,
-            paragraphs: self.session.doc.paragraph_count(),
-            font_dirs: self.config.font_dirs.len(),
-            pointer_px: self.pointer.map(|(x, y)| (x * density, y * density)),
-            pointer_down: self.pointer_down,
-            focused: self.focused,
-        };
-        if !test_pattern::paint(&mut self.pixels, self.width, self.height, &view) {
-            return FrameNeeded::No;
-        }
+
+        let raw = self.take_raw_input();
+        let ctx = self.ctx.clone();
+        let ui = &mut self.ui;
+        let output = ctx.run_ui(raw, |root| {
+            ui.logic(root.ctx());
+            ui.ui(root);
+        });
+
+        // Textures must land before the meshes that sample them, and the delta must be emptied
+        // once applied (egui's Drop asserts on leftovers).
+        let mut textures = output.textures_delta;
+        self.painter.apply_textures(&textures);
+        textures.clear();
+
+        let pixels_per_point =
+            if output.pixels_per_point.is_finite() && output.pixels_per_point > 0.0 { output.pixels_per_point } else { self.density };
+        let primitives = ctx.tessellate(output.shapes, pixels_per_point);
+        self.painter.paint(Target { pixels: &mut self.pixels, width: self.width, height: self.height }, pixels_per_point, &primitives);
         self.frames = self.frames.saturating_add(1);
+        if self.frames.is_multiple_of(300) {
+            let stats = self.painter.stats();
+            log::debug!("{} frames, {} triangles, {} px, {} textures", self.frames, stats.triangles, stats.pixels, self.painter.texture_count());
+        }
         FrameNeeded::Yes
+    }
+
+    /// The input for this frame: what the shell reported since the last one, plus the state egui
+    /// keeps per frame.
+    fn take_raw_input(&mut self) -> RawInput {
+        let ppp = self.density;
+        let mut raw = std::mem::take(&mut self.raw);
+        raw.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width as f32 / ppp, self.height as f32 / ppp)));
+        raw.time = Some(self.elapsed_s());
+        raw.focused = self.focused;
+        raw.max_texture_side = Some(MAX_TEXTURE_SIDE);
+        raw.system_theme = match self.config.theme {
+            Theme::Dark => Some(egui::Theme::Dark),
+            Theme::Light => Some(egui::Theme::Light),
+            Theme::Auto => raw.system_theme,
+        };
+        // egui reads the density and the window state from the viewport, not the raw input.
+        let info = raw.viewports.entry(egui::ViewportId::ROOT).or_default();
+        info.native_pixels_per_point = Some(ppp);
+        info.focused = Some(self.focused);
+        self.ui.raw_input_hook(&mut raw);
+        // The next frame's scaffolding; `events` was taken above and stays empty until input comes.
+        self.raw.max_texture_side = Some(MAX_TEXTURE_SIDE);
+        self.raw.viewports.entry(egui::ViewportId::ROOT).or_default();
+        raw
     }
 
     /// A one-line summary for the shell's `stats()` (hilog, ArkTS logs, and a future About box).
     pub fn stats_json(&self) -> String {
         let pointer = match self.pointer {
-            Some((x, y)) => serde_json::json!([x, y]),
+            Some(p) => serde_json::json!([p.x, p.y]),
             None => serde_json::Value::Null,
         };
+        let stats = self.painter.stats();
         serde_json::json!({
             "width": self.width,
             "height": self.height,
@@ -319,14 +405,28 @@ impl App {
             "focused": self.focused,
             "pointer": pointer,
             "pressed": self.pointer_down,
-            "paragraphs": self.session.doc.paragraph_count(),
+            "paragraphs": self.paragraphs(),
             "fontDirs": self.config.font_dirs.len(),
             "theme": self.config.theme.as_str(),
             "locale": self.config.locale,
             "typed": self.typed.chars().rev().take(24).collect::<String>().chars().rev().collect::<String>(),
             "last": self.last,
+            "triangles": stats.triangles,
+            "pixels": stats.pixels,
+            "textures": self.painter.texture_count(),
         })
         .to_string()
+    }
+
+    /// The events waiting for the next frame (tests look at them; the shell never does).
+    #[doc(hidden)]
+    pub fn pending_events(&self) -> &[Event] {
+        &self.raw.events
+    }
+
+    /// Textures the painter is holding (the font atlas, the page tiles), for tests and logs.
+    pub fn painter_textures(&self) -> usize {
+        self.painter.texture_count()
     }
 }
 

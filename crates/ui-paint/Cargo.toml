@@ -1,0 +1,16 @@
+[package]
+name = "wordcraft-ui-paint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WordCraft's software rasteriser for egui: draws the UI's meshes into an RGBA frame without a GPU"
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }
+
+[dev-dependencies]
+# TexturesDelta::set holds a SmallVec (as egui builds it).
+smallvec = "1"

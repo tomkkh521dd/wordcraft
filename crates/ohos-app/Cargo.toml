@@ -3,7 +3,7 @@ name = "wordcraft-ohos-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "WordCraft for HarmonyOS NEXT, without the C ABI: surface, input, configuration and (from step 3) the egui UI"
+description = "WordCraft for HarmonyOS NEXT, without the C ABI: the egui UI on a native surface, input, and configuration"
 
 [lints]
 workspace = true
@@ -12,6 +12,13 @@ workspace = true
 wordcraft-doc = { workspace = true }
 wordcraft-engine = { workspace = true }
 wordcraft-fonts = { workspace = true }
+# The same UI the desktop and the browser draw, driven without winit/eframe.
+wordcraft-ui-egui = { workspace = true }
+# Rasterised on the CPU, since HarmonyOS gets no GPU context here.
+wordcraft-ui-paint = { path = "../ui-paint" }
+# `default_fonts` brings egui's own fallback faces (the symbols and emoji the ribbon icons use),
+# which eframe enables on the desktop; without it those glyphs draw as boxes.
+egui = { workspace = true, features = ["default_fonts"] }
 # The settings folder the shell gives us (app sandbox) and its control-key file layout.
 wordcraft-control-key = { workspace = true }
 log = { workspace = true }

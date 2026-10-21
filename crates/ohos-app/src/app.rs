@@ -71,6 +71,10 @@ pub struct App {
     composing: bool,
     scrolled: (f32, f32),
     timings: FrameTimings,
+    /// What the previous frame's meshes looked like, to find the part that changed.
+    previous: Vec<(u64, egui::Rect)>,
+    /// The part of the frame that changed since the previous one, in points (`None`: all of it).
+    damage: Option<egui::Rect>,
 }
 
 impl App {
@@ -108,6 +112,8 @@ impl App {
             composing: false,
             scrolled: (0.0, 0.0),
             timings: FrameTimings::default(),
+            previous: Vec::new(),
+            damage: None,
             config,
             notes,
         };
@@ -384,8 +390,19 @@ impl App {
         let tessellating = Instant::now();
         let primitives = ctx.tessellate(output.shapes, pixels_per_point);
         let tessellate_ms = tessellating.elapsed().as_secs_f32() * 1000.0;
+        let damage = self.take_damage(&primitives);
+        if damage == Some(egui::Rect::NOTHING) {
+            // Every mesh is identical to the previous frame's: the screen is already right.
+            self.timings = FrameTimings { ui_ms, tessellate_ms, paint_ms: 0.0 };
+            return FrameNeeded::No;
+        }
         let painting = Instant::now();
-        self.painter.paint(Target { pixels: &mut self.pixels, width: self.width, height: self.height }, pixels_per_point, &primitives);
+        self.painter.paint_damaged(
+            Target { pixels: &mut self.pixels, width: self.width, height: self.height },
+            pixels_per_point,
+            &primitives,
+            damage,
+        );
         let paint_ms = painting.elapsed().as_secs_f32() * 1000.0;
         self.timings = FrameTimings { ui_ms, tessellate_ms, paint_ms };
         self.frames = self.frames.saturating_add(1);
@@ -465,6 +482,75 @@ impl App {
     #[doc(hidden)]
     pub fn pending_events(&self) -> &[Event] {
         &self.raw.events
+    }
+
+    /// Which part of the frame changed: a full repaint unless every mesh can be matched against
+    /// the previous frame and the changes are small.
+    ///
+    /// egui hands over the whole scene each pass, so the diff is per mesh: same count, and a
+    /// signature (geometry, uv, colour, texture) that mostly matches. A moved or edited mesh
+    /// damages both its old and its new rectangle, so nothing stale is left behind.
+    fn take_damage(&mut self, primitives: &[egui::ClippedPrimitive]) -> Option<egui::Rect> {
+        use std::hash::{Hash, Hasher};
+        let mut current: Vec<(u64, egui::Rect)> = Vec::with_capacity(primitives.len());
+        for clipped in primitives {
+            let egui::epaint::Primitive::Mesh(mesh) = &clipped.primitive else { continue };
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            mesh.texture_id.hash(&mut hasher);
+            mesh.indices.hash(&mut hasher);
+            for vertex in &mesh.vertices {
+                vertex.pos.x.to_bits().hash(&mut hasher);
+                vertex.pos.y.to_bits().hash(&mut hasher);
+                vertex.uv.x.to_bits().hash(&mut hasher);
+                vertex.uv.y.to_bits().hash(&mut hasher);
+                vertex.color.to_array().hash(&mut hasher);
+            }
+            let mut rect = clipped.clip_rect;
+            for vertex in &mesh.vertices {
+                rect = rect.union(egui::Rect::from_min_max(vertex.pos, vertex.pos));
+            }
+            current.push((hasher.finish(), rect));
+        }
+
+        let frame = egui::Rect::from_min_size(Pos2::ZERO, vec2(self.width as f32 / self.density, self.height as f32 / self.density));
+        let damage = if self.previous.len() == current.len() && !current.is_empty() {
+            let mut changed: Option<egui::Rect> = None;
+            for (index, (signature, rect)) in current.iter().enumerate() {
+                let (old_signature, old_rect) = self.previous[index];
+                if *signature != old_signature {
+                    let both = rect.union(old_rect).expand(1.0);
+                    changed = Some(changed.map_or(both, |acc| acc.union(both)));
+                }
+            }
+            match changed {
+                // A tiny change costs less to repaint exactly; a huge one is cheaper as a frame.
+                Some(rect) if rect.area() < frame.area() * 0.6 && rect.intersects(frame) => Some(rect.intersect(frame)),
+                Some(_) => None,
+                None => Some(egui::Rect::NOTHING),
+            }
+        } else {
+            None
+        };
+        self.previous = current;
+        self.damage = damage;
+        damage
+    }
+
+    /// The damage rectangle in pixels, `(x, y, width, height)`; the whole frame when everything
+    /// changed (or nothing did, in which case nothing is presented).
+    pub fn damage_px(&self) -> (u32, u32, u32, u32) {
+        let ppp = self.density;
+        match self.damage {
+            Some(rect) if !rect.is_negative() && rect.width() > 0.0 && rect.height() > 0.0 => {
+                let x = (rect.min.x * ppp).floor().max(0.0) as u32;
+                let y = (rect.min.y * ppp).floor().max(0.0) as u32;
+                let right = (rect.max.x * ppp).ceil().clamp(0.0, self.width as f32) as u32;
+                let bottom = (rect.max.y * ppp).ceil().clamp(0.0, self.height as f32) as u32;
+                (x.min(self.width), y.min(self.height), right.saturating_sub(x), bottom.saturating_sub(y))
+            }
+            Some(_) => (0, 0, 0, 0),
+            None => (0, 0, self.width, self.height),
+        }
     }
 
     /// Where the last frame's time went.

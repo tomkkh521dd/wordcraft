@@ -217,6 +217,28 @@ pub extern "C" fn wc_focused() -> i32 {
     with(0, |app| i32::from(app.focused()))
 }
 
+/// The part of the frame that changed, in pixels: `(x, y, width, height)`. The shell copies and
+/// flushes only this region; a width or height of zero means nothing changed.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_damage_x() -> u32 {
+    with(0, |app| app.damage_px().0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_damage_y() -> u32 {
+    with(0, |app| app.damage_px().1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_damage_width() -> u32 {
+    with(0, |app| app.damage_px().2)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_damage_height() -> u32 {
+    with(0, |app| app.damage_px().3)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_pressed() -> i32 {
     with(0, |app| i32::from(app.pressed()))

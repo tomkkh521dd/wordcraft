@@ -54,6 +54,13 @@ size_t wc_stride(void);
 
 /* --- diagnostics --------------------------------------------------------- */
 
+/* The part of the frame that changed since the previous one, in pixels. Copy and flush only this
+ * region; a width or height of zero means nothing changed since the last frame was presented. */
+uint32_t wc_damage_x(void);
+uint32_t wc_damage_y(void);
+uint32_t wc_damage_width(void);
+uint32_t wc_damage_height(void);
+
 uint32_t wc_width(void);
 uint32_t wc_height(void);
 float wc_density(void);

@@ -90,7 +90,8 @@ void Presenter::Detach() {
     height_ = 0;
 }
 
-bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint32_t height, size_t stride) {
+bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint32_t height, size_t stride,
+                       uint32_t damage_x, uint32_t damage_y, uint32_t damage_w, uint32_t damage_h) {
     if (window_ == nullptr || pixels == nullptr || width == 0 || height == 0) {
         return false;
     }
@@ -133,18 +134,34 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
         return false;
     }
 
-    const uint32_t copyW = std::min(width, (uint32_t)handle->width);
-    const uint32_t copyH = std::min(height, (uint32_t)handle->height);
+    // Only the damaged part: the buffer keeps the previous frame everywhere else.
+    const uint32_t frame_w = std::min(width, (uint32_t)handle->width);
+    const uint32_t frame_h = std::min(height, (uint32_t)handle->height);
+    const uint32_t copyX = std::min(damage_x, frame_w);
+    const uint32_t copyY = std::min(damage_y, frame_h);
+    const uint32_t copyW = std::min(damage_w, frame_w - copyX);
+    const uint32_t copyH = std::min(damage_h, frame_h - copyY);
+    if (copyW == 0 || copyH == 0) {
+        OH_NativeWindow_NativeWindowAbortBuffer(window_, buffer);
+        if (fence >= 0) {
+            close(fence);
+        }
+        return false;
+    }
     if (!warnedGeometry_ && (copyW != width || copyH != height)) {
         // The surface is a different size than the frame we drew: copy what fits and say so once.
         WC_LOGW("frame %{public}ux%{public}u into %{public}dx%{public}d buffer", width, height, handle->width, handle->height);
         warnedGeometry_ = true;
     }
     for (uint32_t y = 0; y < copyH; ++y) {
-        std::memcpy(dst + (size_t)y * (size_t)handle->stride, pixels + (size_t)y * stride, (size_t)copyW * 4);
+        const uint32_t row = copyY + y;
+        std::memcpy(dst + (size_t)row * (size_t)handle->stride + (size_t)copyX * 4,
+                    pixels + (size_t)row * stride + (size_t)copyX * 4, (size_t)copyW * 4);
     }
 
-    Region region{nullptr, 0};  // the whole buffer is dirty
+    // Tell the compositor which part to pick up.
+    Region::Rect dirty{copyX, copyY, copyW, copyH};
+    Region region{&dirty, 1};
     ret = OH_NativeWindow_NativeWindowFlushBuffer(window_, buffer, fence, region);
     if (ret != 0) {
         WC_LOGE("FlushBuffer failed (%{public}d)", ret);

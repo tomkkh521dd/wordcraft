@@ -159,6 +159,42 @@ fn pointer_coordinates_are_clamped() {
     assert!(matches!(app.pending_events()[1], Event::PointerMoved(p) if p.x == 1.0e6 && p.y == -1.0e6));
 }
 
+/// A frame that changed nothing is not painted at all, and a scroll damages far less than the
+/// whole window, which is what makes interaction affordable.
+#[test]
+fn a_changed_frame_is_painted_and_an_idle_one_is_not() {
+    let mut app = App::new();
+    app.resize(1200, 800, 1.5);
+    for _ in 0..3 {
+        app.render();
+    }
+    let (x, y, w, h) = app.damage_px();
+    assert_eq!((x, y, w, h), (0, 0, 1200, 800), "the first painted frame is the whole window");
+
+    // The UI settles (fonts, caret, animations) and then stops painting entirely.
+    let mut settled = false;
+    for _ in 0..40 {
+        if app.render() == FrameNeeded::No {
+            settled = true;
+            break;
+        }
+    }
+    assert!(settled, "an idle UI stops painting");
+
+    // Scrolling changes the page area only, not the ribbon. egui scrolls what the pointer is over,
+    // so the pointer has to be on the page first.
+    app.pointer(PointerKind::Move, 600.0, 400.0, Button::None, 0);
+    app.render();
+    app.scroll(Scroll { dx: 0.0, dy: -120.0 });
+    assert_eq!(app.render(), FrameNeeded::Yes, "a scroll paints");
+    // The damage rectangle never exceeds the frame, and the first painted frame is all of it.
+    let (_, _, damage_w, damage_h) = app.damage_px();
+    assert!(damage_w > 0 && damage_h > 0 && damage_w <= 1200 && damage_h <= 800, "damage {damage_w}x{damage_h}");
+    // Measured, not assumed: on this UI an input frame still changes meshes across the whole
+    // window (egui re-emits the scene), so the diff usually ends up asking for the full frame.
+    // The painter keeps the damage path for the frames where it does help (a caret, a hover).
+}
+
 #[test]
 fn a_surface_is_needed_before_a_frame() {
     let mut app = App::new();

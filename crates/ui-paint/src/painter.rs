@@ -60,16 +60,29 @@ impl Painter {
 
     /// Draw one frame. `pixels_per_point` turns egui's points into the target's pixels.
     ///
+    /// When `damage` says which part of the frame changed, only that part is drawn: the rest of the
+    /// buffer still holds the previous frame (nothing clears it), so a caret blink or a hover costs
+    /// a few thousand pixels instead of five million. Pass `None` for a full repaint.
+    ///
     /// Paint callbacks (`Primitive::Callback`) need a renderer of their own and are skipped; this
     /// UI draws none.
     pub fn paint(&mut self, target: Target<'_>, pixels_per_point: f32, primitives: &[ClippedPrimitive]) {
+        self.paint_damaged(target, pixels_per_point, primitives, None);
+    }
+
+    /// [`Self::paint`] with a damage rectangle, in points (egui's coordinate space).
+    pub fn paint_damaged(&mut self, target: Target<'_>, pixels_per_point: f32, primitives: &[ClippedPrimitive], damage: Option<egui::Rect>) {
         let ppp = if pixels_per_point.is_finite() && pixels_per_point > 0.0 { pixels_per_point } else { 1.0 };
         self.frames = self.frames.saturating_add(1);
         self.stats = Stats::default();
         let Some(mut canvas) = Canvas::new(target) else { return };
+        let damage = damage.map(|rect| clip_to_pixels(rect, ppp, canvas.width(), canvas.height()));
         for clipped in primitives {
             let Primitive::Mesh(mesh) = &clipped.primitive else { continue };
-            let clip = clip_to_pixels(clipped.clip_rect, ppp, canvas.width(), canvas.height());
+            let mut clip = clip_to_pixels(clipped.clip_rect, ppp, canvas.width(), canvas.height());
+            if let Some(damage) = damage {
+                clip = intersect(clip, damage);
+            }
             if clip.is_empty() || mesh.indices.len() < 3 || mesh.vertices.is_empty() {
                 continue;
             }
@@ -108,6 +121,11 @@ impl Edges {
     fn is_empty(&self) -> bool {
         self.x1 <= self.x0 || self.y1 <= self.y0
     }
+}
+
+/// The overlap of two clip rectangles.
+fn intersect(a: Edges, b: Edges) -> Edges {
+    Edges { x0: a.x0.max(b.x0), y0: a.y0.max(b.y0), x1: a.x1.min(b.x1), y1: a.y1.min(b.y1) }
 }
 
 /// A quad drawn one texture pixel per screen pixel: copy its rows.

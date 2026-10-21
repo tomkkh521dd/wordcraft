@@ -228,6 +228,39 @@ fn hostile_input_does_not_panic() {
     assert!(pixels.iter().all(|b| *b == 0));
 }
 
+/// Drawing only a damaged rectangle leaves the rest of the frame exactly as it was.
+#[test]
+fn a_damage_rectangle_leaves_the_rest_of_the_frame_alone() {
+    let mut painter = Painter::new();
+    let (w, h) = (8u32, 8u32);
+    let mut pixels = frame(w, h);
+    // First the whole frame in blue.
+    painter.paint(target(&mut pixels, w, h), 1.0, &[clipped(quad(0.0, 0.0, 8.0, 8.0, Color32::from_rgb(0, 0, 255), pos2(0.0, 0.0)), whole())]);
+    let before = pixels.clone();
+    // Then a small red square, damaged to a 2x2 point corner.
+    let damage = Rect { min: pos2(0.0, 0.0), max: pos2(2.0, 2.0) };
+    painter.paint_damaged(
+        target(&mut pixels, w, h),
+        1.0,
+        &[clipped(quad(0.0, 0.0, 2.0, 2.0, Color32::from_rgb(255, 0, 0), pos2(0.0, 0.0)), whole())],
+        Some(damage),
+    );
+    let at = |x: u32, y: u32| pixels[((y * w + x) * 4) as usize..][..4].to_vec();
+    assert_eq!(at(0, 0), [255, 0, 0, 255], "inside the damage");
+    assert_eq!(at(1, 1), [255, 0, 0, 255], "inside the damage");
+    assert_eq!(at(3, 3), before[((3 * w + 3) * 4) as usize..][..4].to_vec(), "outside the damage is untouched");
+    assert_eq!(at(7, 7), before[((7 * w + 7) * 4) as usize..][..4].to_vec(), "outside the damage is untouched");
+    // A mesh that misses the damage entirely draws nothing.
+    let mut empty = frame(w, h);
+    painter.paint_damaged(
+        target(&mut empty, w, h),
+        1.0,
+        &[clipped(quad(6.0, 6.0, 8.0, 8.0, Color32::WHITE, pos2(0.0, 0.0)), whole())],
+        Some(Rect { min: pos2(0.0, 0.0), max: pos2(2.0, 2.0) }),
+    );
+    assert!(empty.iter().all(|b| *b == 0), "outside the damage nothing is drawn");
+}
+
 #[test]
 fn a_paint_callback_is_skipped() {
     let mut painter = Painter::new();

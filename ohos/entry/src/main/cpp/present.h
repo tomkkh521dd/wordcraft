@@ -32,8 +32,11 @@ public:
     void Detach();
     bool Ready() const { return window_ != nullptr; }
 
-    /* Copy one RGBA8888 frame into the next buffer and flush it. False when nothing went out. */
-    bool Present(const uint8_t *pixels, size_t len, uint32_t width, uint32_t height, size_t stride);
+    /* Copy one RGBA8888 frame into the next buffer and flush it. False when nothing went out.
+     * With `damage_*` set, only that rectangle is copied and flushed (the rest of the buffer still
+     * holds the previous frame), which is what makes a caret blink or a hover cheap. */
+    bool Present(const uint8_t *pixels, size_t len, uint32_t width, uint32_t height, size_t stride,
+                 uint32_t damage_x, uint32_t damage_y, uint32_t damage_w, uint32_t damage_h);
 
 private:
     /* The buffer's memory, mapped once per file descriptor and kept until Detach. Mapping costs a

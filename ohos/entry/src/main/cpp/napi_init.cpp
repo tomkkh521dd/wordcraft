@@ -349,7 +349,14 @@ napi_value Render(napi_env env, napi_callback_info info) {
     if (!g_presenter.Ready() || wc_render() != 1) {
         return Number(env, 0.0);
     }
-    const bool presented = g_presenter.Present(wc_pixels(), wc_pixels_len(), wc_width(), wc_height(), wc_stride());
+    const uint32_t damage_w = wc_damage_width();
+    const uint32_t damage_h = wc_damage_height();
+    if (damage_w == 0 || damage_h == 0) {
+        // Nothing changed visually; the screen already shows the last frame.
+        return Number(env, 0.0);
+    }
+    const bool presented = g_presenter.Present(wc_pixels(), wc_pixels_len(), wc_width(), wc_height(), wc_stride(),
+                                               wc_damage_x(), wc_damage_y(), damage_w, damage_h);
     if (!presented) {
         return Number(env, 0.0);
     }

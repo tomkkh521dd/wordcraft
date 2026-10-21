@@ -6,6 +6,7 @@
 mod assets;
 mod ico;
 mod layers;
+mod ohos;
 mod parity;
 mod stats;
 mod version;
@@ -21,6 +22,9 @@ commands:
   assets          check that every icon/image/font/asset is attributed in ATTRIBUTION.md
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   wasm            cargo check --target wasm32-unknown-unknown for the wasm-safe crates
+  ohos [--build] [--target aarch64|x86_64]
+                  cargo check (or --build) for aarch64/x86_64-unknown-linux-ohos: every crate the
+                  HarmonyOS app links, found SDK included (set OHOS_SDK_HOME if yours is elsewhere)
   ci              fmt --check, clippy -D warnings, test, assets, layers, wasm (stops at first failure)
   corpus [--download]
                   show where test corpora live; --download fetches PngSuite into corpus/pngsuite
@@ -40,6 +44,7 @@ fn main() -> ExitCode {
         Some("assets") => assets::run(&root()),
         Some("layers") => cmd_layers(),
         Some("wasm") => cmd_wasm(),
+        Some("ohos") => ohos::run_cmd(&rest),
         Some("ci") => cmd_ci(),
         Some("corpus") => cmd_corpus(rest.contains(&"--download")),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),

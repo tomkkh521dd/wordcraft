@@ -748,13 +748,24 @@ fn mini_font(tables: &[([u8; 4], Vec<u8>)]) -> Vec<u8> {
 
 /// The platform's font folders (the system's and the user's), scanned by [`FontDb::global`].
 /// Empty on wasm.
+///
+/// Folders added with [`set_system_font_dirs`] come first: a platform whose system font folders
+/// are only known at run time (HarmonyOS, where the system reports them) passes them in at
+/// start-up, before the first lookup that needs the catalog.
 pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     if cfg!(target_arch = "wasm32") {
         return dirs;
     }
+    // OHOS: added by the host (see `set_system_font_dirs`).
+    if let Some(extra) = EXTRA_SYSTEM_DIRS.get() {
+        dirs.extend(extra.iter().cloned());
+    }
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    if cfg!(target_os = "macos") {
+    // OHOS: the system's fonts live in one folder, `/system/fonts`.
+    if cfg!(target_env = "ohos") {
+        dirs.push("/system/fonts".into());
+    } else if cfg!(target_os = "macos") {
         dirs.extend(["/System/Library/Fonts", "/Library/Fonts"].map(Into::into));
         if let Some(h) = &home {
             dirs.push(h.join("Library/Fonts"));
@@ -783,6 +794,19 @@ pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
         }
     }
     dirs
+}
+
+/// Folders added to [`system_font_dirs`] by the host, once per process.
+static EXTRA_SYSTEM_DIRS: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// Adds folders to scan for system fonts, before [`FontDb::global`] first needs the catalog.
+///
+/// HarmonyOS reports its system font folders through the UI framework, and they differ per
+/// device; the host passes them here at start-up. Folders that don't exist are skipped by the
+/// scan. `false` when folders were already given (the first call wins, so nothing changes after
+/// the catalog may have been built).
+pub fn set_system_font_dirs(dirs: impl IntoIterator<Item = std::path::PathBuf>) -> bool {
+    EXTRA_SYSTEM_DIRS.set(dirs.into_iter().collect()).is_ok()
 }
 
 /// One face found in a font file.

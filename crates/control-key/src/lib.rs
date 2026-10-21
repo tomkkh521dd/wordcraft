@@ -2,14 +2,31 @@
 //! (which reads it): `<settings>/control-key.<instance>`. See `docs/control-protocol.md`, Keys.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The settings folder the host chose at start-up, when the platform doesn't report one through
+/// the environment (HarmonyOS: the app's sandbox, which only the UI framework knows).
+static HOST_SETTINGS: OnceLock<PathBuf> = OnceLock::new();
+
+/// Tells the settings lookup where the app's settings folder is, once per process.
+///
+/// Used by platforms whose app sandbox path is only known at run time, before any setting is
+/// read. `WORDCRAFT_PROFILE_DIR` still overrides it (isolated runs ask for that explicitly).
+pub fn set_settings_dir(dir: impl Into<PathBuf>) {
+    let _ = HOST_SETTINGS.set(dir.into());
+}
 
 /// The app's settings folder (preferences, logs, key files): macOS
 /// `~/Library/Application Support/WordCraft`, Windows `%APPDATA%\WordCraft`, otherwise
 /// `$XDG_CONFIG_HOME/wordcraft` or `~/.config/wordcraft`.
-/// `WORDCRAFT_PROFILE_DIR` overrides the entire folder for isolated runs.
+/// `WORDCRAFT_PROFILE_DIR` overrides the entire folder for isolated runs; a folder the host gave
+/// with [`set_settings_dir`] comes next.
 pub fn settings_dir() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("WORDCRAFT_PROFILE_DIR").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(path));
+    }
+    if let Some(dir) = HOST_SETTINGS.get() {
+        return Some(dir.clone());
     }
     if cfg!(target_os = "macos") {
         std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/WordCraft"))

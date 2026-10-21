@@ -36,6 +36,12 @@ fi
 # CARGO_TARGET_DIR keeps working.
 export WORDCRAFT_TARGET_DIR="$CARGO_TARGET_DIR"
 
+# Signing material is machine-local: DevEco's "Automatically generate signature" writes it into
+# build-profile.json5, which is tracked. Building with it is normal; committing it is not.
+if ! git -C "$ROOT" diff --quiet -- ohos/build-profile.json5 2>/dev/null; then
+  echo "note: ohos/build-profile.json5 has local changes (signing material) — do not commit them." >&2
+fi
+
 cd "$ROOT/ohos"
 echo "== WordCraft: hvigor assembleHap ($mode)"
 "$HVIGORW" clean --no-daemon >/dev/null 2>&1 || true

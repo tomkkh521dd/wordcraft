@@ -28,15 +28,37 @@ Rust staticlib from `<repo>/target/<triple>/release/` (or `$WORDCRAFT_TARGET_DIR
 
 ## Installing
 
-An unsigned HAP compiles, but installing needs a signature:
+An unsigned HAP compiles, but installing needs a signature. A HarmonyOS device and emulator only
+trust Huawei's chain, so one of these applies:
 
-1. **DevEco Studio (easiest)**: open `ohos/`, sign in, *File › Project Structure › Signing
-   Configs › Automatically generate signature*. It writes the certificate, profile and keystore
-   into `build-profile.json5` for this machine only.
-2. **Command line**: `hdc install -r dist/release/wordcraft-<version>-debug.hap`.
+1. **DevEco Studio's automatic signing (one click, once per machine).** Open `ohos/`, sign in,
+   *File › Project Structure › Signing Configs › Automatically generate signature*. DevEco writes
+   the keystore, certificate and **provisioning profile** (bound to the connected devices' UDIDs)
+   into `ohos/build-profile.json5`, and `hvigor` then signs `assembleHap` output by itself.
+   That block is machine-local: **do not commit it** (the build script says so too).
+2. **Sign a HAP you already built** with your own material:
 
-`hdc` ships with the SDK (`.../sdk/default/openharmony/toolchains/hdc`). Start the emulator from
-DevEco's Device Manager (the `MateBook Pro` 2in1 image is the primary target).
+   ```sh
+   packaging/ohos/sign-debug.sh --material /path/to/signing-dir        dist/release/wordcraft-<version>-debug.hap dist/release/wordcraft-<version>-debug-signed.hap
+   ```
+
+   The directory needs `password.txt`, a `.p12` keystore, the app's `.cer` certificate **chain**
+   (leaf, CA, root) and the `.p7b` provisioning profile for `karl.hmsoft.wordcraft`. A Huawei
+   **root** CA certificate is not an app certificate, and a profile is per bundle, so material
+   from another project cannot be reused.
+3. **OpenHarmony devices only**: `packaging/ohos/sign-debug.sh --openharmony-test …` signs with the
+   SDK's test chain. A HarmonyOS image rejects it with *install sign info inconsistent*.
+
+Then:
+
+```sh
+hdc install -r dist/release/wordcraft-<version>-debug.hap
+hdc shell aa start -a EntryAbility -b karl.hmsoft.wordcraft
+```
+
+`hdc` ships with the SDK (`.../sdk/default/openharmony/toolchains/hdc`). For a debug profile, the
+device's UDID is `hdc shell bm get --udid` (the emulator answers
+`454D55057494E058383604C05D22BBCAD43ABB4167681896C32C700000000000` on this machine).
 
 ## Looking at a run
 

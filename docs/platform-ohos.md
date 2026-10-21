@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (step 2: the HAP project, the C++ shell and the Rust app build and draw a test pattern on a surface; previously major: first version, toolchain gate and host injection points) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** trivial (signing: what a device trusts, the UDID a debug profile needs, and `sign-debug.sh`; previously minor: step 2, the HAP project, C++ shell and test pattern; previously major: first version, toolchain gate and host injection points) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -101,10 +101,13 @@ packaging/ohos/build-hap.sh                 # …then hvigor packages the HAP in
 packaging/ohos/build-hap.sh release         # a release HAP
 ```
 
-Installing needs a signature: DevEco's *Automatically generate signature* (once, per machine) or a
-self-signed material; `hdc install -r dist/release/wordcraft-<version>-debug.hap` then puts it on
-the device. See [packaging/ohos/README.md](../packaging/ohos/README.md) for details and the log
-commands.
+Installing needs a signature from Huawei's chain: DevEco's *Automatically generate signature*
+(once per machine; it also creates the per-bundle provisioning profile that names the connected
+devices' UDIDs), or your own keystore + app certificate chain + profile through
+`packaging/ohos/sign-debug.sh --material`. The SDK's OpenHarmony test chain is accepted only by
+OpenHarmony images — a HarmonyOS device or emulator answers *install sign info inconsistent*.
+`hdc install -r dist/release/wordcraft-<version>-debug.hap` then puts it on the device; see
+[packaging/ohos/README.md](../packaging/ohos/README.md) for the details and the log commands.
 
 ### What the first frame shows
 
@@ -155,5 +158,6 @@ Until the UI lands (next step), the app draws a test pattern
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-21 | trivial | Signing: `sign-debug.sh` (own material, or the SDK's OpenHarmony test chain), what a HarmonyOS image refuses, and the UDID a debug profile is bound to |
 | 2026-10-21 | minor | Step 2: HAP project, C++ shell (NAPI, native window buffer, hilog), Rust app with configuration and input, test pattern; unsigned HAP builds for arm64 and x86_64 |
 | 2026-10-21 | major | First version: `cargo xtask ohos` for both targets, font/settings injection points, upstream-footprint policy |

@@ -16,8 +16,10 @@ wordcraft-fonts = { workspace = true }
 wordcraft-ui-egui = { workspace = true }
 # Rasterised on the CPU, since HarmonyOS gets no GPU context here.
 wordcraft-ui-paint = { path = "../ui-paint" }
-# `default_fonts` brings egui's own fallback faces (the symbols and emoji the ribbon icons use),
-# which eframe enables on the desktop; without it those glyphs draw as boxes.
+# egui's own fallback faces (Ubuntu-Light, Noto Emoji, the emoji icon font): the interface font
+# families are built from `FontDefinitions::default()`, which holds nothing without this feature.
+# `wordcraft-ui-egui` already pulls egui with its default features (as eframe does on the desktop),
+# so this line only states the requirement where the app is assembled.
 egui = { workspace = true, features = ["default_fonts"] }
 # The settings folder the shell gives us (app sandbox) and its control-key file layout.
 wordcraft-control-key = { workspace = true }

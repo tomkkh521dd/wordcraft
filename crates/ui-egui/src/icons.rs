@@ -55,6 +55,12 @@ impl Pen<'_> {
         let font = if bold { crate::theme::semibold(size * self.s()) } else { FontId::proportional(size * self.s()) };
         self.p.text(self.pt(x, y), egui::Align2::CENTER_CENTER, t, font, c);
     }
+    /// Whether the interface fonts can draw `t`. A few icons write a letter as text; one whose
+    /// letter needs a CJK face falls back where there is none (a build without craft-fonts and
+    /// without a CJK interface language), instead of drawing epaint's `◻` box.
+    fn can_draw(&self, t: &str) -> bool {
+        self.p.fonts_mut(|f| f.has_glyphs(&FontId::proportional(12.0), t))
+    }
     /// Horizontal text lines (a paragraph).
     fn lines(&self, x0: f32, x1: f32, ys: &[f32]) {
         for y in ys {
@@ -890,7 +896,9 @@ pub fn paint(p: &Painter, r: Rect, name: &str, c: Color32, accent: Color32) {
         }
         "translate" | "language" => {
             pen.text(6.5, 7.0, 9.0, "A", c, true);
-            pen.text(13.5, 13.5, 9.0, "あ", a, false);
+            // The second letter comes from another script: the kana where the interface fonts have
+            // it, Inter's Greek `α` where no face has kana (see [`Pen::can_draw`]).
+            pen.text(13.5, 13.5, 9.0, if pen.can_draw("あ") { "あ" } else { "α" }, a, false);
         }
         "deleteComment" => {
             pen.closed(&[(2.5, 3.5), (17.5, 3.5), (17.5, 13.5), (9.0, 13.5), (5.0, 17.0), (5.0, 13.5), (2.5, 13.5)], c);

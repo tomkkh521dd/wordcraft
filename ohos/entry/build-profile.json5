@@ -1,0 +1,21 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      // The C++ shell; it links the Rust staticlib, so build that first (packaging/ohos/).
+      "path": "./src/main/cpp/CMakeLists.txt",
+      // Static C++ runtime (see CMakeLists.txt): nothing in the HAP needs libc++_shared.so.
+      "arguments": "-DOHOS_STL=c++_static",
+      "cppFlags": "",
+      "abiFilters": [
+        "arm64-v8a",
+        "x86_64"
+      ]
+    }
+  },
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+[package]
+name = "wordcraft-ohos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "WordCraft for HarmonyOS NEXT: the C ABI the HAP's C++ shell calls (libwordcraft.so links this)"
+
+# The one place the port allows `unsafe_code`, because exporting a C symbol needs
+# `#[unsafe(no_mangle)]`: see src/lib.rs. It is set to `deny` here (not inherited as `forbid`) so
+# the ABI module can opt in; every other lint follows the workspace.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[lib]
+# staticlib: the C++ shell links it into libwordcraft.so (a .so cannot absorb another .so).
+# rlib: so host `cargo test`/`clippy --all-targets` can build this crate outside the HAP.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+wordcraft-ohos-app = { path = "../../crates/ohos-app" }

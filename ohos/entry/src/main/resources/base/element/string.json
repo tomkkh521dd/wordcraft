@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "WordCraft word processor"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Write documents"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "WordCraft"
+    }
+  ]
+}

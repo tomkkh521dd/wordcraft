@@ -1,0 +1,8 @@
+{
+  "modelVersion": "26.0.0",
+  "name": "wordcraft",
+  "version": "0.9.0",
+  "description": "WordCraft for HarmonyOS NEXT.",
+  "dependencies": {},
+  "devDependencies": {}
+}

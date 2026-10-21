@@ -1,0 +1,6 @@
+{
+  "name": "libwordcraft.so",
+  "types": "./index.d.ts",
+  "version": "0.9.0",
+  "description": "WordCraft's native module: NAPI, the XComponent's surface, and the Rust app."
+}

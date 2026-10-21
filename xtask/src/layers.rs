@@ -49,9 +49,12 @@ pub const TABLE: &[(&str, Class)] = &[
     ("mcp", Class::Layer(5)),
     ("zotero", Class::Layer(5)),
     ("ui-egui", Class::Layer(6)),
+    // The HarmonyOS app's logic (egui UI, surface, input) and its C ABI crate.
+    ("ohos-app", Class::Layer(6)),
     ("testkit", Class::Testkit),
     // apps and tooling
     ("wordcraft", Class::Exempt),
+    ("ohos", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
     ("xtask", Class::Exempt),

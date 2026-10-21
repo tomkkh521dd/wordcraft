@@ -1,0 +1,12 @@
+{
+  "name": "entry",
+  "version": "0.9.0",
+  "description": "WordCraft's HarmonyOS entry module.",
+  "main": "",
+  "author": "karl.hmsoft",
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    // The native module's ArkTS declarations (src/main/cpp/types/libwordcraft/index.d.ts).
+    "libwordcraft.so": "file:./src/main/cpp/types/libwordcraft"
+  }
+}

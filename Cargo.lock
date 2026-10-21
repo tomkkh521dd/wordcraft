@@ -5336,6 +5336,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "wordcraft-ohos"
+version = "0.9.0"
+dependencies = [
+ "wordcraft-ohos-app",
+]
+
+[[package]]
+name = "wordcraft-ohos-app"
+version = "0.9.0"
+dependencies = [
+ "log",
+ "proptest",
+ "serde_json",
+ "wordcraft-control-key",
+ "wordcraft-doc",
+ "wordcraft-engine",
+ "wordcraft-fonts",
+]
+
+[[package]]
 name = "wordcraft-pdf"
 version = "0.9.0"
 dependencies = [

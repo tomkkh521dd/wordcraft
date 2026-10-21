@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** major (first version: toolchain gate and the two host injection points; the app shell, services and HAP packaging are planned, see *Status*) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (step 2: the HAP project, the C++ shell and the Rust app build and draw a test pattern on a surface; previously major: first version, toolchain gate and host injection points) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -13,9 +13,10 @@ files the port touches**.
 |---|---|
 | Core (L0–L5) and the egui UI (L6) compile for both OHOS targets | ✅ done (`cargo xtask ohos`) |
 | Host injection points: system font folders, settings folder | ✅ done |
-| App shell (`apps/wordcraft-ohos`, `ohos/` HAP project) | ⏳ planned |
+| HAP project, C++ shell (NAPI + native window buffer), Rust app | ✅ builds; draws a test pattern on a surface (`packaging/ohos/build-hap.sh`) |
+| The document UI (egui) on the surface | ⏳ next |
 | Platform services (file picker, clipboard, IME, appearance, locale) | ⏳ planned |
-| Packaging, signing, AppGallery | ⏳ planned |
+| Packaging (signed HAP), AppGallery | ⏳ planned |
 
 The desktop shell (`apps/wordcraft`, eframe/winit) is **not** used on HarmonyOS: winit has no
 OpenHarmony backend. The HarmonyOS shell draws the same `wordcraft-ui-egui` UI through
@@ -29,9 +30,28 @@ layout, renderer (`vello_cpu`) and PDF writer build unchanged. Only the *shell* 
 and it is already swappable: `wordcraft-ui-egui` has no eframe/winit dependency, and every OS
 service the UI needs goes through `Services` (`crates/ui-egui/src/lib.rs`).
 
+## The project
+
+```
+ohos/                        HarmonyOS project (DevEco Studio opens this folder)
+  AppScope/app.json5         bundleName karl.hmsoft.wordcraft, version, icon
+  entry/src/main/ets/        EntryAbility, the page with the XComponent, input, system info
+  entry/src/main/cpp/        NAPI module, the surface's buffer queue, hilog (no unsafe in Rust)
+  entry/src/main/cpp/types/  the module's .d.ts, so ArkTS sees typed functions
+apps/wordcraft-ohos/         the C ABI the C++ calls (wc_*), the only `#[unsafe(no_mangle)]` in the port
+crates/ohos-app/             the app: configuration, input, the document session, the frame
+packaging/ohos/              env discovery, build-native.sh, build-hap.sh
+```
+
+ArkTS owns what belongs to the UI framework — the XComponent and its surface lifecycle, input
+events, the display density, the system's fonts, language and colour mode — and passes plain
+values to C++, which turns them into environment variables and `wc_*` calls. Configuration crosses
+the boundary as environment variables so no pointer ever enters Rust; frames leave as a
+`(pointer, length)` pair that C++ copies into the window buffer.
+
 ## Upstream footprint
 
-Keeping the port easy to follow upstream is a rule, not a preference. **Four upstream files** are
+Keeping the port easy to follow upstream is a rule, not a preference. **Five upstream files** are
 touched, all additively, each marked `// OHOS:` where the change is a branch or a cfg:
 
 | File | What | Why it can't be a host-side injection |
@@ -40,6 +60,7 @@ touched, all additively, each marked `// OHOS:` where the change is a branch or 
 | `crates/fonts/src/lib.rs` | re-export of `set_system_font_dirs` | — |
 | `crates/control-key/src/lib.rs` | `set_settings_dir()`: the app sandbox folder | Only the UI framework knows the sandbox path |
 | `xtask/src/main.rs` | one `match` arm; the command lives in the new `xtask/src/ohos.rs` | — |
+| `xtask/src/layers.rs` | two table entries: `ohos-app` at L6, `ohos` exempt | The layering check requires every crate to be classified |
 
 Deliberately **not** changed, because the host can do it instead:
 
@@ -52,8 +73,9 @@ Deliberately **not** changed, because the host can do it instead:
 - **Desktop shell** (`apps/wordcraft`): untouched.
 - **Root `Cargo.toml`**: `members = ["crates/*", "apps/*", …]` already picks new crates up.
 
-Everything else is new: `ohos/` (HAP project), `apps/wordcraft-ohos/` (Rust shell), `crates/ui-paint/`
-(the egui software rasteriser), `packaging/ohos/`, this page.
+Everything else is new: `ohos/` (the HAP project), `apps/wordcraft-ohos/` (the C ABI crate),
+`crates/ohos-app/` (the app), `packaging/ohos/`, this page — and, next, `crates/ui-paint/` (the
+egui software rasteriser).
 
 ## Building
 
@@ -71,11 +93,32 @@ the usual install folders (DevEco Studio's bundled SDK included), newest version
 `<ndk>/llvm/bin/clang` and `<ndk>/sysroot`, and writes small compiler wrappers under
 `target/ohos-toolchain/` so paths with spaces work. No per-machine cargo config is needed.
 
-The HAP is built by DevEco's own tooling (planned, see *Status*):
+The app itself (hvigor, DevEco's build tool, packages ArkTS, resources and `libwordcraft.so`):
 
 ```sh
-hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
+packaging/ohos/build-native.sh              # the Rust staticlib for both ABIs
+packaging/ohos/build-hap.sh                 # …then hvigor packages the HAP into dist/release/
+packaging/ohos/build-hap.sh release         # a release HAP
 ```
+
+Installing needs a signature: DevEco's *Automatically generate signature* (once, per machine) or a
+self-signed material; `hdc install -r dist/release/wordcraft-<version>-debug.hap` then puts it on
+the device. See [packaging/ohos/README.md](../packaging/ohos/README.md) for details and the log
+commands.
+
+### What the first frame shows
+
+Until the UI lands (next step), the app draws a test pattern
+(`crates/ohos-app/src/test_pattern.rs`) that makes a wrong buffer or input path obvious:
+
+- four stripes, **red, green, blue, white** — blue where red belongs means the buffer is BGRA;
+- a checkerboard — a wrong stride skews the squares into a rhombus;
+- the very top line turns green with focus, grey without;
+- an orange bar that grows with the events received (input reaches the app);
+- one square per paragraph in the sample document (the engine runs on the device) and one cyan
+  square per system font folder the shell reported;
+- a yellow line sweeping across (frames advance), a crosshair at the pointer, and ten 10-vp
+  squares at the bottom left (density).
 
 ## Platform notes
 
@@ -92,9 +135,13 @@ hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-dae
   and crash recovery (`crates/engine/src/recovery/desktop.rs`) work as on Linux.
 - **Rendering.** Pages are rasterised on the CPU by `vello_cpu` (`crates/render`); the shell
   composites egui's triangles on the CPU as well and hands finished frames to the native window
-  buffer. No GPU context is created, so a driver bug can't take the editor down.
-- **`unsafe`.** The port keeps `unsafe_code = "forbid"`: every NAPI/NDK pointer stays in the small
-  C++ layer (`ohos/entry/src/main/cpp`), and Rust only exposes `extern "C"` entry points.
+  buffer (`OH_NativeWindow_NativeWindowRequestBuffer` → copy → `FlushBuffer`). No GPU context is
+  created, so a driver bug can't take the editor down.
+- **`unsafe`.** Every NAPI and NDK pointer stays in the small C++ layer
+  (`ohos/entry/src/main/cpp`). Rust has one exception: exporting a symbol C can find needs
+  `#[unsafe(no_mangle)]`, so `apps/wordcraft-ohos` sets `unsafe_code = "deny"` and only its
+  `src/abi.rs` opts out; nothing there dereferences a pointer. `crates/ohos-app` (all the logic)
+  keeps `unsafe_code = "forbid"`.
 
 ## Known gaps (planned, tracked in [gaps.md](gaps.md))
 
@@ -108,4 +155,5 @@ hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-dae
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-21 | minor | Step 2: HAP project, C++ shell (NAPI, native window buffer, hilog), Rust app with configuration and input, test pattern; unsigned HAP builds for arm64 and x86_64 |
 | 2026-10-21 | major | First version: `cargo xtask ohos` for both targets, font/settings injection points, upstream-footprint policy |

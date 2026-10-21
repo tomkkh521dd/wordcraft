@@ -391,7 +391,17 @@ impl App {
         self.frames = self.frames.saturating_add(1);
         if self.frames.is_multiple_of(300) {
             let stats = self.painter.stats();
-            log::debug!("{} frames, {} triangles, {} px, {} textures", self.frames, stats.triangles, stats.pixels, self.painter.texture_count());
+            log::debug!(
+                "{} frames, {} triangles, {}/{} px blitted, {} textures, ui {:.1} ms, tessellate {:.1} ms, paint {:.1} ms",
+                self.frames,
+                stats.triangles,
+                stats.blitted,
+                stats.pixels,
+                self.painter.texture_count(),
+                self.timings.ui_ms,
+                self.timings.tessellate_ms,
+                self.timings.paint_ms
+            );
         }
         FrameNeeded::Yes
     }

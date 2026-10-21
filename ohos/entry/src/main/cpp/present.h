@@ -11,6 +11,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <utility>
 
 #include <native_window/external_window.h>
 
@@ -34,7 +36,13 @@ public:
     bool Present(const uint8_t *pixels, size_t len, uint32_t width, uint32_t height, size_t stride);
 
 private:
+    /* The buffer's memory, mapped once per file descriptor and kept until Detach. Mapping costs a
+     * page-table walk over the whole 21 MB frame; doing it per frame cost more than drawing. */
+    uint8_t *MapBuffer(BufferHandle *handle, size_t &size);
+    void UnmapAll();
+
     OHNativeWindow *window_ = nullptr;
+    std::map<int32_t, std::pair<void *, size_t>> mappings_;
     uint32_t width_ = 0;
     uint32_t height_ = 0;
     /* Set once, so a size mismatch between our frame and the buffer is reported once, not per frame. */

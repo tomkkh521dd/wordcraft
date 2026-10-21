@@ -47,7 +47,40 @@ int32_t Presenter::Attach(uint64_t surfaceId, uint32_t width, uint32_t height) {
     return 0;
 }
 
+uint8_t *Presenter::MapBuffer(BufferHandle *handle, size_t &size) {
+    if (handle == nullptr || handle->fd < 0) {
+        return nullptr;
+    }
+    if (handle->virAddr != nullptr) {
+        size = static_cast<size_t>(handle->size);
+        return static_cast<uint8_t *>(handle->virAddr);
+    }
+    auto found = mappings_.find(handle->fd);
+    if (found != mappings_.end()) {
+        size = found->second.second;
+        return static_cast<uint8_t *>(found->second.first);
+    }
+    size = handle->size > 0 ? static_cast<size_t>(handle->size) : (size_t)handle->stride * (size_t)handle->height;
+    if (size == 0) {
+        return nullptr;
+    }
+    void *mapped = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, handle->fd, 0);
+    if (mapped == MAP_FAILED) {
+        return nullptr;
+    }
+    mappings_[handle->fd] = {mapped, size};
+    return static_cast<uint8_t *>(mapped);
+}
+
+void Presenter::UnmapAll() {
+    for (auto &entry : mappings_) {
+        munmap(entry.second.first, entry.second.second);
+    }
+    mappings_.clear();
+}
+
 void Presenter::Detach() {
+    UnmapAll();
     if (window_ != nullptr) {
         OH_NativeWindow_DestroyNativeWindow(window_);
         window_ = nullptr;
@@ -83,31 +116,15 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
         }
         return false;
     }
-    // `virAddr` is not always filled in: the documented CPU path maps the buffer's file descriptor
-    // (see "XComponent 渲染上屏原理"). Map when it is missing, and keep the mapping only for this
-    // frame.
-    uint8_t *dst = static_cast<uint8_t *>(handle->virAddr);
-    void *mapped = nullptr;
-    size_t mappedSize = 0;
-    if (dst == nullptr && handle->fd >= 0) {
-        mappedSize = handle->size > 0 ? static_cast<size_t>(handle->size) : (size_t)handle->stride * (size_t)handle->height;
-        if (mappedSize > 0) {
-            mapped = mmap(nullptr, mappedSize, PROT_READ | PROT_WRITE, MAP_SHARED, handle->fd, 0);
-            if (mapped != MAP_FAILED) {
-                dst = static_cast<uint8_t *>(mapped);
-            } else {
-                mapped = nullptr;
-            }
-        }
-    }
+    // `virAddr` is not always filled in: the documented CPU path maps the buffer's file descriptor,
+    // once per buffer (see MapBuffer).
+    size_t mapped_size = 0;
+    uint8_t *dst = MapBuffer(handle, mapped_size);
     if (dst == nullptr || handle->stride <= 0 || handle->width <= 0 || handle->height <= 0) {
         if (!warnedGeometry_) {
             WC_LOGE("buffer is not writable: %{public}dx%{public}d stride %{public}d size %{public}d fd %{public}d virAddr %{public}d",
                     handle->width, handle->height, handle->stride, handle->size, handle->fd, handle->virAddr == nullptr ? 0 : 1);
             warnedGeometry_ = true;
-        }
-        if (mapped != nullptr) {
-            munmap(mapped, mappedSize);
         }
         OH_NativeWindow_NativeWindowAbortBuffer(window_, buffer);
         if (fence >= 0) {
@@ -125,11 +142,6 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
     }
     for (uint32_t y = 0; y < copyH; ++y) {
         std::memcpy(dst + (size_t)y * (size_t)handle->stride, pixels + (size_t)y * stride, (size_t)copyW * 4);
-    }
-    if (mapped != nullptr) {
-        // Written through the mapping: unmap before handing the buffer back.
-        munmap(mapped, mappedSize);
-        dst = nullptr;
     }
 
     Region region{nullptr, 0};  // the whole buffer is dirty

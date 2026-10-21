@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <native_buffer/native_buffer.h>
@@ -74,8 +75,40 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
         return false;
     }
     BufferHandle *handle = OH_NativeWindow_GetBufferHandleFromNative(buffer);
-    if (handle == nullptr || handle->virAddr == nullptr || handle->stride <= 0 || handle->width <= 0 || handle->height <= 0) {
-        WC_LOGE("buffer has no writable memory");
+    if (handle == nullptr) {
+        WC_LOGE("buffer has no handle");
+        OH_NativeWindow_NativeWindowAbortBuffer(window_, buffer);
+        if (fence >= 0) {
+            close(fence);
+        }
+        return false;
+    }
+    // `virAddr` is not always filled in: the documented CPU path maps the buffer's file descriptor
+    // (see "XComponent 渲染上屏原理"). Map when it is missing, and keep the mapping only for this
+    // frame.
+    uint8_t *dst = static_cast<uint8_t *>(handle->virAddr);
+    void *mapped = nullptr;
+    size_t mappedSize = 0;
+    if (dst == nullptr && handle->fd >= 0) {
+        mappedSize = handle->size > 0 ? static_cast<size_t>(handle->size) : (size_t)handle->stride * (size_t)handle->height;
+        if (mappedSize > 0) {
+            mapped = mmap(nullptr, mappedSize, PROT_READ | PROT_WRITE, MAP_SHARED, handle->fd, 0);
+            if (mapped != MAP_FAILED) {
+                dst = static_cast<uint8_t *>(mapped);
+            } else {
+                mapped = nullptr;
+            }
+        }
+    }
+    if (dst == nullptr || handle->stride <= 0 || handle->width <= 0 || handle->height <= 0) {
+        if (!warnedGeometry_) {
+            WC_LOGE("buffer is not writable: %{public)dx%{public}d stride %{public}d size %{public}d fd %{public}d virAddr %{public}d",
+                    handle->width, handle->height, handle->stride, handle->size, handle->fd, handle->virAddr == nullptr ? 0 : 1);
+            warnedGeometry_ = true;
+        }
+        if (mapped != nullptr) {
+            munmap(mapped, mappedSize);
+        }
         OH_NativeWindow_NativeWindowAbortBuffer(window_, buffer);
         if (fence >= 0) {
             close(fence);
@@ -90,9 +123,13 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
         WC_LOGW("frame %{public}ux%{public}u into %{public}dx%{public}d buffer", width, height, handle->width, handle->height);
         warnedGeometry_ = true;
     }
-    uint8_t *dst = static_cast<uint8_t *>(handle->virAddr);
     for (uint32_t y = 0; y < copyH; ++y) {
         std::memcpy(dst + (size_t)y * (size_t)handle->stride, pixels + (size_t)y * stride, (size_t)copyW * 4);
+    }
+    if (mapped != nullptr) {
+        // Written through the mapping: unmap before handing the buffer back.
+        munmap(mapped, mappedSize);
+        dst = nullptr;
     }
 
     Region region{nullptr, 0};  // the whole buffer is dirty

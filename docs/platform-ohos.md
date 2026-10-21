@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** trivial (signing: what a device trusts, the UDID a debug profile needs, and `sign-debug.sh`; previously minor: step 2, the HAP project, C++ shell and test pattern; previously major: first version, toolchain gate and host injection points) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -13,7 +13,7 @@ files the port touches**.
 |---|---|
 | Core (L0–L5) and the egui UI (L6) compile for both OHOS targets | ✅ done (`cargo xtask ohos`) |
 | Host injection points: system font folders, settings folder | ✅ done |
-| HAP project, C++ shell (NAPI + native window buffer), Rust app | ✅ builds; draws a test pattern on a surface (`packaging/ohos/build-hap.sh`) |
+| HAP project, C++ shell (NAPI + native window buffer), Rust app | ✅ builds; **first frame verified on the emulator** (see *Verified on the emulator*) |
 | The document UI (egui) on the surface | ⏳ next |
 | Platform services (file picker, clipboard, IME, appearance, locale) | ⏳ planned |
 | Packaging (signed HAP), AppGallery | ⏳ planned |
@@ -109,6 +109,30 @@ OpenHarmony images — a HarmonyOS device or emulator answers *install sign info
 `hdc install -r dist/release/wordcraft-<version>-debug.hap` then puts it on the device; see
 [packaging/ohos/README.md](../packaging/ohos/README.md) for the details and the log commands.
 
+### Verified on the emulator
+
+HarmonyOS 6.1.1 (API 24, x86_64) tablet emulator, `karl.hmsoft.wordcraft`, 1920×2799 at 1.5×:
+
+| What | Result |
+|---|---|
+| Buffer format | stripes read red-green-blue-white: the buffer is RGBA, not BGRA |
+| Stride | the checkerboard's squares stay square |
+| Density | the 10-vp ruler draws ten 15-px squares; a touch at 700,1100 px puts the crosshair there exactly |
+| Input | touch down/move reach the app (`events` climbs), and the pointer is drawn where it was put |
+| Engine | the sample document loads and lays out (41 paragraphs) |
+| System fonts | one folder reported by `font.getUIFontConfig()` |
+| Frames | presented every display refresh (~24 fps for the 5.4 MP test pattern, which repaints every pixel per frame; the real UI will paint rows, not pixels) |
+
+Two things only a device shows, both handled:
+
+- **`BufferHandle.virAddr` is null** on this emulator. The documented CPU path is to `mmap` the
+  buffer's file descriptor for the frame and `munmap` it before `FlushBuffer`; that is what
+  `present.cpp` does now.
+- **A different signature cannot replace an installed app.** Installing over a build signed with
+  another certificate fails with `9568332 install sign info inconsistent`; `hdc uninstall
+  karl.hmsoft.wordcraft` first. (DevEco's *Run* installed one such build; the CLI install then
+  needed the uninstall.)
+
 ### What the first frame shows
 
 Until the UI lands (next step), the app draws a test pattern
@@ -158,6 +182,7 @@ Until the UI lands (next step), the app draws a test pattern
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-21 | minor | First frame verified on the emulator: RGBA order, stride, density, input and the engine all correct; `mmap` needed because `virAddr` is null; a changed signature needs an uninstall first |
 | 2026-10-21 | trivial | Signing: `sign-debug.sh` (own material, or the SDK's OpenHarmony test chain), what a HarmonyOS image refuses, and the UDID a debug profile is bound to |
 | 2026-10-21 | minor | Step 2: HAP project, C++ shell (NAPI, native window buffer, hilog), Rust app with configuration and input, test pattern; unsigned HAP builds for arm64 and x86_64 |
 | 2026-10-21 | major | First version: `cargo xtask ohos` for both targets, font/settings injection points, upstream-footprint policy |

@@ -49,9 +49,11 @@ trust Huawei's chain, so one of these applies:
 3. **OpenHarmony devices only**: `packaging/ohos/sign-debug.sh --openharmony-test …` signs with the
    SDK's test chain. A HarmonyOS image rejects it with *install sign info inconsistent*.
 
-Then:
+Then (after a signature change, the old copy has to go first, or the install fails with
+`9568332 install sign info inconsistent`):
 
 ```sh
+hdc uninstall karl.hmsoft.wordcraft   # only when the signature changed
 hdc install -r dist/release/wordcraft-<version>-debug.hap
 hdc shell aa start -a EntryAbility -b karl.hmsoft.wordcraft
 ```

@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -210,7 +210,7 @@ HUAWEI BKY-W00, HarmonyOS 6.1.0.135 (API 24), 1840×2650 at 2.25×, 703 system f
 | What | Result |
 |---|---|
 | The interface | the ribbon in Chinese at 2.25×, the ruler, the sample document with its table and lists, the status bar |
-| Frames | 7172 triangles, 3.7M/17.0M px blitted, 9 textures; ui 1.2 ms, tessellate 0.2 ms, paint 46.2 ms — the same wall as the emulator: the rasteriser, not the CPU class |
+| Frames | 7172 triangles, 3.7M/17.0M px blitted, 9 textures; ui 1.2 ms, tessellate 0.2 ms, paint 46.2 ms before the rasteriser work below and 36.8 ms after it — the same wall as the emulator: the rasteriser, not the CPU class |
 | File picker | Ctrl+O opened `选择文件`; Ctrl+S opened `选择路径` on the user's own folder list |
 | Save | saved as `WordCraft-name-check.docx` in 个人: the working copy took the typed name, and 10,593 bytes were copied back over the picked URI |
 | Clipboard | Ctrl+C wrote 2021 text chars + 4010 HTML chars; Ctrl+V read them back (`2 record(s) … text/html,text/plain`) |
@@ -283,9 +283,12 @@ Two things only a device shows, both handled:
 
 ## Known gaps (planned, tracked in [gaps.md](gaps.md))
 
-- Frame rate: about 5 fps at 1920×2799 (paint 50.4 ms of a painted frame). The software
-  rasteriser is the bottleneck; row-wise fills, a 1:1 blit for page bitmaps and dirty rectangles
-  are the next work.
+- Frame rate: paint 36.8 ms for a full 1840×2650 frame on the tablet (was 46 ms). The 1:1 page
+  blit now copies whole texture rows (12.6 → 4.2 ms in the bench) and the general triangle path
+  steps its edge functions along a row instead of recomputing them per pixel (glyph quads 50 → 38
+  ms). Text sampling (bilinear per glyph pixel) and repainting only the damaged part of a frame
+  are the next work; `cargo run -p wordcraft-ui-paint --release --example bench` prints the
+  per-case numbers.
 - Input method, what is still missing: the Huawei IME (6.1.0) sends no preview text to a
   self-drawn client, so the composing letters are shown only by the keyboard's own bubble rather
   than inside the page (the `Preedit` path is wired and draws them if an IME does send them); a
@@ -312,6 +315,7 @@ Two things only a device shows, both handled:
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | trivial | Rasteriser: the 1:1 blit copies whole texture rows when the source is contiguous (12.6 → 4.2 ms per 4.9 MP frame in the new `crates/ui-paint/examples/bench.rs`), and the general triangle path evaluates each edge function once per row and steps it per pixel (8000 glyph quads 50 → 38 ms); a full UI frame on the tablet paints in 36.8 ms instead of 46.2 |
 | 2026-10-22 | minor | OHOS.5b: IME text arrives as one `ImeEvent::Commit` per commit (one undo step) and preview text as `ImeEvent::Preedit`, drawn at the caret by the desktop path; the Huawei IME on 6.1.0 sends no preview text to self-drawn clients, so composing letters stay in the keyboard's bubble |
 | 2026-10-22 | minor | OHOS.5a: the system input method is bound to the self-drawn canvas — a tap brings up the soft keyboard at the caret, English and Chinese (拼音 candidate) text land in the document, Backspace/Delete/Enter/arrow moves are wired, the candidate window follows the caret; composing text is not yet drawn inline |
 | 2026-10-22 | minor | A real tablet (BKY-W00, HarmonyOS 6.1.0, 2.25×): the UI, the picker and the clipboard verified there; a paste of another app's copy worked without `READ_PASTEBOARD`; only keys that can type carry a character (an injected F11 brought `K`); the working copy takes the file name the user typed |

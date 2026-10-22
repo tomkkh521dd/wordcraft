@@ -32,7 +32,7 @@ pub struct Painter {
     frames: u64,
     stats: Stats,
     /// Row scratch for the blit path, kept between frames so a frame allocates nothing.
-    row: Vec<[u8; 4]>,
+    row: Vec<Color32>,
 }
 
 impl Painter {
@@ -88,7 +88,7 @@ impl Painter {
             }
             let texture = self.store.get(mesh.texture_id);
             if texture.is_some() && self.row.len() < canvas.width() {
-                self.row.resize(canvas.width(), [0; 4]);
+                self.row.resize(canvas.width(), Color32::TRANSPARENT);
             }
             if let Some(texture) = texture
                 && blit_quad(&mut canvas, mesh, texture, clip, ppp, &mut self.row, &mut self.stats)
@@ -133,7 +133,7 @@ fn intersect(a: Edges, b: Edges) -> Edges {
 /// egui draws every image and every page tile as such a quad, and they hold most of the frame's
 /// pixels, so this runs before the general triangle path. `false` means "not this case", and the
 /// caller draws the triangles instead.
-fn blit_quad(canvas: &mut Canvas<'_>, mesh: &Mesh, texture: &Texture, clip: Edges, ppp: f32, row: &mut [[u8; 4]], stats: &mut Stats) -> bool {
+fn blit_quad(canvas: &mut Canvas<'_>, mesh: &Mesh, texture: &Texture, clip: Edges, ppp: f32, row: &mut [Color32], stats: &mut Stats) -> bool {
     if mesh.vertices.len() != 4 || mesh.indices.len() != 6 {
         return false;
     }
@@ -178,16 +178,31 @@ fn blit_quad(canvas: &mut Canvas<'_>, mesh: &Mesh, texture: &Texture, clip: Edge
     }
     let texel_x0 = u0 * tw as f32;
     let texel_y0 = t0 * th as f32;
+    let count = dx1 - dx0;
+    let x_offset = dx0 as f32 - x0; // pixels into the quad
+    // Where the first drawn pixel reads from: when that starts on a texel boundary and fits, the
+    // whole row is one contiguous slice of the texture and needs no per-pixel work at all.
+    let first_texel = texel_x0 + x_offset;
+    let contiguous = (first_texel - first_texel.round()).abs() <= 0.01
+        && first_texel.round() >= 0.0
+        && (first_texel.round() as isize) + count as isize <= tw as isize;
     let opaque = false; // the page tiles have alpha; blending is still a per-pixel 4-byte op
     for y in dy0..dy1 {
         let ty = ((texel_y0 + (y as f32 - y0)) as isize).clamp(0, th as isize - 1) as usize;
         let source_row = texture.pixels.get(ty * tw..(ty + 1) * tw);
         let Some(source_row) = source_row else { continue };
-        let x_offset = dx0 as f32 - x0; // pixels into the quad
-        let count = dx1 - dx0;
+        if contiguous {
+            let tx = first_texel.round() as usize;
+            if let Some(source) = source_row.get(tx..tx + count) {
+                canvas.blit_row(y, dx0, source, opaque);
+                stats.pixels = stats.pixels.saturating_add(count as u64);
+                stats.blitted = stats.blitted.saturating_add(count as u64);
+                continue;
+            }
+        }
         for (i, slot) in row.iter_mut().take(count).enumerate() {
-            let tx = ((texel_x0 + x_offset + i as f32) as isize).clamp(0, tw as isize - 1) as usize;
-            *slot = source_row.get(tx).map(|c| c.to_array()).unwrap_or([0, 0, 0, 255]);
+            let tx = (first_texel + i as f32).round().clamp(0.0, (tw - 1) as f32) as usize;
+            *slot = source_row.get(tx).copied().unwrap_or(Color32::from_rgb(0, 0, 0));
         }
         canvas.blit_row(y, dx0, &row[..count], opaque);
         stats.pixels = stats.pixels.saturating_add(count as u64);
@@ -244,29 +259,79 @@ fn draw_triangle(canvas: &mut Canvas<'_>, v: [Vertex; 3], texture: Option<&Textu
         return;
     }
 
+    // Everything inside the triangle is affine in x and y, so each edge's value is a line:
+    // computing it once per row and stepping it per pixel costs two adds instead of the
+    // multiplications a fresh `edge()` per pixel would take. Text (thousands of small quads
+    // sampling the font atlas) is almost all of the general path's work.
+    let inv_area = 1.0 / area;
+    let e = [edge_line(p[1], p[2]), edge_line(p[2], p[0]), edge_line(p[0], p[1])];
+    // A glyph quad has one colour throughout; only its texture coordinate varies.
+    let uniform = if v[0].color == v[1].color && v[1].color == v[2].color { Some(v[0].color.to_array()) } else { None };
+    let uv = [v[0].uv, v[1].uv, v[2].uv];
     for y in y0..y1 {
         let py = y as f32 + 0.5;
-        for x in x0..x1 {
-            let at = egui::pos2(x as f32 + 0.5, py);
-            let w = [edge(p[1], p[2], at), edge(p[2], p[0], at), edge(p[0], p[1], at)];
-            let inside = w.iter().all(|w| *w >= 0.0) || w.iter().all(|w| *w <= 0.0);
+        let mut w = e.map(|line| line.at(x0, py));
+        let Some(row) = canvas.row(y) else { continue };
+        let Some(span) = row.get_mut(x0..x1) else { continue };
+        for (i, pixel) in span.iter_mut().enumerate() {
+            let inside = (w[0] >= 0.0 && w[1] >= 0.0 && w[2] >= 0.0) || (w[0] <= 0.0 && w[1] <= 0.0 && w[2] <= 0.0);
             if !inside {
+                for (value, line) in w.iter_mut().zip(e.iter()) {
+                    *value += line.step_x;
+                }
                 continue;
             }
-            let weights = [w[0] / area, w[1] / area, w[2] / area];
-            let uv = egui::pos2(
-                v[0].uv.x * weights[0] + v[1].uv.x * weights[1] + v[2].uv.x * weights[2],
-                v[0].uv.y * weights[0] + v[1].uv.y * weights[1] + v[2].uv.y * weights[2],
-            );
-            let colour = lerp_color([v[0].color, v[1].color, v[2].color], weights);
+            let weights = [w[0] * inv_area, w[1] * inv_area, w[2] * inv_area];
+            let colour = match uniform {
+                Some(colour) => colour,
+                None => lerp_color([v[0].color, v[1].color, v[2].color], weights),
+            };
             let texel = match texture {
-                Some(texture) => modulate(colour, sample(texture, uv)),
+                Some(texture) => {
+                    let at = egui::pos2(
+                        uv[0].x * weights[0] + uv[1].x * weights[1] + uv[2].x * weights[2],
+                        uv[0].y * weights[0] + uv[1].y * weights[1] + uv[2].y * weights[2],
+                    );
+                    modulate(colour, sample(texture, at))
+                }
                 None => colour,
             };
-            canvas.put(x, y, texel);
-            stats.pixels = stats.pixels.saturating_add(1);
+            // A fully transparent texel changes nothing; skip the blend for glyph edges.
+            if texel[3] != 0 {
+                crate::canvas::over(pixel, texel);
+                stats.pixels = stats.pixels.saturating_add(1);
+            }
+            let _ = i;
+            for (value, line) in w.iter_mut().zip(e.iter()) {
+                *value += line.step_x;
+            }
         }
     }
+}
+
+/// One edge function of a triangle as a line in `x` and `y`: `value(x, y) = step_x * x + step_y * y + offset`.
+#[derive(Clone, Copy)]
+struct EdgeLine {
+    step_x: f32,
+    step_y: f32,
+    offset: f32,
+}
+
+impl EdgeLine {
+    /// `edge(a, b, at)` written out: linear in `at`, so a row needs one evaluation and a step.
+    fn new(a: egui::Pos2, b: egui::Pos2) -> Self {
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        Self { step_x: -dy, step_y: dx, offset: dy * a.x - dx * a.y }
+    }
+
+    #[inline]
+    fn at(self, x: usize, y: f32) -> f32 {
+        self.step_x * (x as f32 + 0.5) + self.step_y * y + self.offset
+    }
+}
+
+fn edge_line(a: egui::Pos2, b: egui::Pos2) -> EdgeLine {
+    EdgeLine::new(a, b)
 }
 
 /// Twice the signed area of the triangle `(a, b, c)`.

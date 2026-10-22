@@ -87,9 +87,9 @@ impl<'a> Canvas<'a> {
 
     /// Copy whole pixels from a texture row, replacing the destination (an opaque blit).
     ///
-    /// `src` holds `count` RGBA texels; the destination must already be clipped to the row.
+    /// `src` holds `count` texels; the destination must already be clipped to the row.
     #[inline]
-    pub(crate) fn blit_row(&mut self, y: usize, x0: usize, src: &[[u8; 4]], opaque: bool) {
+    pub(crate) fn blit_row(&mut self, y: usize, x0: usize, src: &[Color32], opaque: bool) {
         let count = src.len();
         if count == 0 {
             return;
@@ -101,30 +101,23 @@ impl<'a> Canvas<'a> {
         }
         let Some(row) = self.row(y) else { return };
         let Some(span) = row.get_mut(x0..x1) else { return };
+        let source = &src[..x1 - x0];
         if opaque {
-            span.copy_from_slice(&src[..x1 - x0]);
+            for (px, texel) in span.iter_mut().zip(source) {
+                *px = texel.to_array();
+            }
         } else {
-            for (px, texel) in span.iter_mut().zip(src.iter()) {
-                over(px, *texel);
+            for (px, texel) in span.iter_mut().zip(source) {
+                over(px, texel.to_array());
             }
         }
     }
 
-    /// Write one pixel's texel where the texture already understands blending (glyphs and images).
-    #[inline]
-    pub(crate) fn put(&mut self, x: usize, y: usize, texel: [u8; 4]) {
-        if texel[3] == 0 || x >= self.width {
-            return;
-        }
-        let Some(row) = self.row(y) else { return };
-        let Some(px) = row.get_mut(x) else { return };
-        over(px, texel);
-    }
 }
 
 /// Premultiplied "source over": `out = src + dst * (1 - src.a)`.
 #[inline]
-fn over(dst: &mut [u8; 4], src: [u8; 4]) {
+pub(crate) fn over(dst: &mut [u8; 4], src: [u8; 4]) {
     let a = u32::from(src[3]);
     if a == 255 {
         *dst = src;

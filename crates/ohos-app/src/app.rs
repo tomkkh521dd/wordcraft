@@ -156,6 +156,11 @@ impl App {
         self.ui.session.view.zoom
     }
 
+    /// Whether the selection covers a range (a handle is drawn only when it does).
+    pub fn selection_is_range(&self) -> bool {
+        !self.ui.session.sel.is_collapsed()
+    }
+
     /// Where the text caret is in points (x, y) and how tall its line is, for the platform's input
     /// method; `None` when no text is being edited.
     pub fn caret(&self) -> Option<(f32, f32, f32)> {

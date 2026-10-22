@@ -60,6 +60,8 @@ int32_t wc_flinging(void);
 
 /* 1 when the document is editing text (a caret is on screen), 0 otherwise. */
 int32_t wc_caret_present(void);
+/* 1 when the selection covers a range (text is selected), 0 for a plain caret. */
+int32_t wc_selection_range(void);
 /* The caret's x and top y in points, and the height of its line (all 0 when there is no caret). */
 float wc_caret_x(void);
 float wc_caret_y(void);

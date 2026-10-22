@@ -214,6 +214,12 @@ pub extern "C" fn wc_caret_present() -> i32 {
     with(0, |app| i32::from(app.caret().is_some()))
 }
 
+/// `1` when the selection covers a range (text is selected), `0` for a plain caret.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_selection_range() -> i32 {
+    with(0, |app| i32::from(app.selection_is_range()))
+}
+
 /// The caret's x in points, or 0 when there is none.
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_caret_x() -> f32 {

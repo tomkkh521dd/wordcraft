@@ -356,6 +356,12 @@ napi_value CaretPresent(napi_env env, napi_callback_info info) {
     return Number(env, wc_caret_present());
 }
 
+/* selectionRange() -> 1 when text is selected */
+napi_value SelectionRange(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_selection_range());
+}
+
 /* caretX() -> the caret's x in points */
 napi_value CaretX(napi_env env, napi_callback_info info) {
     (void)info;
@@ -526,6 +532,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"imePreview", nullptr, ImePreview, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"imeCommit", nullptr, ImeCommit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretPresent", nullptr, CaretPresent, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"selectionRange", nullptr, SelectionRange, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretX", nullptr, CaretX, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretY", nullptr, CaretY, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretHeight", nullptr, CaretHeight, nullptr, nullptr, nullptr, napi_default, nullptr},

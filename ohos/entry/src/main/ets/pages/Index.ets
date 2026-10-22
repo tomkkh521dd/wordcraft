@@ -37,6 +37,11 @@ const KEY_ARROW_UP: number = 2012;
 const KEY_ARROW_DOWN: number = 2013;
 const KEY_ARROW_LEFT: number = 2014;
 const KEY_ARROW_RIGHT: number = 2015;
+/** The selection handle's finger-sized hit area (vp). */
+const HANDLE_TOUCH: number = 44;
+/** How close to the page's top or bottom a dragged handle scrolls, and by how much (vp). */
+const EDGE_SCROLL: number = 40;
+const EDGE_SCROLL_STEP: number = 24;
 /** How long a still finger takes to open the context menu (ms). */
 const LONG_PRESS_MS: number = 600;
 /** How often the working copies are compared with the files the user picked (ms). */
@@ -215,6 +220,16 @@ struct Index {
   private pressDragged: boolean = false;
   /** The long-press timer of the current single-finger press (-1: none). */
   private pressTimer: number = -1;
+  /**
+   * The selection handle: a draggable dot at the caret (the end of the selection), so a selection
+   * can be adjusted with a finger instead of re-dragging from the start. Its position is read from
+   * the page every frame, so it follows the caret wherever typing, scrolling or a menu moves it.
+   */
+  @State private handleVisible: boolean = false;
+  @State private handleIsRange: boolean = false;
+  @State private handleX: number = 0;
+  @State private handleY: number = 0;
+  @State private handleHeight: number = 0;
 
   aboutToAppear(): void {
     const context: common.UIAbilityContext | undefined = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -259,6 +274,18 @@ struct Index {
     this.copyTimer = setInterval(() => this.copyWorkingCopies(), COPY_OUT_INTERVAL_MS);
   }
 
+  /**
+   * HarmonyOS's Back gesture: the first one closes the keyboard (as on every phone and tablet);
+   * with no keyboard up the system leaves the app, which is what Back means there.
+   */
+  onBackPress(): boolean {
+    if (this.imeAttached) {
+      this.detachInputMethod();
+      return true;
+    }
+    return false;
+  }
+
   aboutToDisappear(): void {
     this.stopFrames();
     if (this.copyTimer !== -1) {
@@ -282,6 +309,7 @@ struct Index {
       if (request !== null) {
         this.answerHost(request);
       }
+      this.followCaretHandle();
       if (native.render() === 1) {
         this.presented++;
         if (this.presented % 300 === 0) {
@@ -718,6 +746,74 @@ struct Index {
     this.afterInput();
   }
 
+  /** Keep the handle on the caret's end, and hide it when there is nothing to edit. */
+  private followCaretHandle(): void {
+    const present: boolean = native.caretPresent() === 1;
+    if (!present) {
+      if (this.handleVisible) {
+        this.handleVisible = false;
+      }
+      return;
+    }
+    const x: number = native.caretX();
+    const y: number = native.caretY();
+    const height: number = native.caretHeight();
+    const range: boolean = native.selectionRange() === 1;
+    if (!this.handleVisible) {
+      this.handleVisible = true;
+    }
+    if (range !== this.handleIsRange) {
+      this.handleIsRange = range;
+    }
+    if (Math.abs(x - this.handleX) > 0.5) {
+      this.handleX = x;
+    }
+    if (Math.abs(y - this.handleY) > 0.5) {
+      this.handleY = y;
+    }
+    if (Math.abs(height - this.handleHeight) > 0.5) {
+      this.handleHeight = height;
+    }
+  }
+
+  /**
+   * Drag the selection's end. The first event presses with Shift at the handle, which the page
+   * treats as "extend the selection to here" (the anchor stays at the other end), and the moves
+   * carry the finger on, so the page selects what the finger passes over.
+   */
+  private dragHandle(event: TouchEvent): void {
+    const touch: TouchObject | undefined =
+      event.touches.length > 0 ? event.touches[0] : (event.changedTouches.length > 0 ? event.changedTouches[0] : undefined);
+    if (touch === undefined) {
+      return;
+    }
+    // The handle's own touch coordinates are local to its 44 vp box; the page needs window ones.
+    const x: number = touch.windowX;
+    const y: number = touch.windowY;
+    if (event.type === TouchType.Down) {
+      this.pressDragged = true; // a handle drag is never a context-menu press
+      this.stopPressTimer();
+      native.pointer(POINTER_DOWN, x, y, BUTTON_NONE, MOD_SHIFT);
+    } else if (event.type === TouchType.Move) {
+      native.pointer(POINTER_MOVE, x, y, BUTTON_NONE, MOD_SHIFT);
+      // Near an edge, scroll a little per event so a selection can run past the screen.
+      const heightVp: number = this.surfaceHeightVp();
+      if (y < EDGE_SCROLL) {
+        native.scroll(0, -EDGE_SCROLL_STEP);
+      } else if (heightVp > 0 && y > heightVp - EDGE_SCROLL) {
+        native.scroll(0, EDGE_SCROLL_STEP);
+      }
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      native.pointer(POINTER_UP, x, y, BUTTON_NONE, MOD_SHIFT);
+    }
+  }
+
+  /** The page height in vp, for the handle's edge scrolling. */
+  private surfaceHeightVp(): number {
+    const rect: SurfaceRect = this.controller.getXComponentSurfaceRect();
+    return rect.surfaceHeight / density();
+  }
+
   /**
    * Two fingers drag the page and pinch it.
    *
@@ -857,7 +953,7 @@ struct Index {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.TopStart }) {
       XComponent({ type: XComponentType.SURFACE, controller: this.controller })
         .id('wordcraft')
         .width('100%')
@@ -935,6 +1031,28 @@ struct Index {
           }
           native.key(event.keyCode, event.type === KeyType.Down, false, modifierBits(event), event.keyText);
         })
+
+      // The selection handle: a dot under the caret's end, on a finger-sized hit area. Dragging it
+      // extends the selection from the other end (a Shift press keeps the anchor), and near the top
+      // or bottom edge it scrolls the page, so a selection can run past the screen.
+      if (this.handleVisible) {
+        Stack() {
+          Circle()
+            .width(this.handleIsRange ? 18 : 14)
+            .height(this.handleIsRange ? 18 : 14)
+            .fill('#ff2d6ae0')
+            .stroke('#ffffffff')
+            .strokeWidth(2)
+            .hitTestBehavior(HitTestMode.None)
+        }
+        .width(HANDLE_TOUCH)
+        .height(HANDLE_TOUCH)
+        .position({
+          x: this.handleX - HANDLE_TOUCH / 2,
+          y: this.handleY + this.handleHeight - HANDLE_TOUCH / 2,
+        })
+        .onTouch((event: TouchEvent) => this.dragHandle(event))
+      }
     }
     .width('100%')
     .height('100%')

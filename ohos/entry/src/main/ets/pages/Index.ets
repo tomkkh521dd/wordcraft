@@ -2,6 +2,7 @@ import native from 'libwordcraft.so';
 import { display, font, window } from '@kit.ArkUI';
 import { displaySync } from '@kit.ArkGraphics2D';
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { inputMethod } from '@kit.IMEKit';
 import { i18n } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
@@ -28,6 +29,14 @@ const MOD_META: number = 8;
 const MOD_CAPS: number = 16;
 /** Most pixels of a clipboard picture that may be pasted (`paste_picture::MAX_PIXELS`). */
 const MAX_PASTE_PIXELS: number = 50000000;
+/** ArkUI key codes the input method's actions turn into (see `@ohos.multimodalInput.keyCode`). */
+const KEY_ENTER: number = 2054;
+const KEY_BACKSPACE: number = 2055;
+const KEY_DELETE: number = 2071;
+const KEY_ARROW_UP: number = 2012;
+const KEY_ARROW_DOWN: number = 2013;
+const KEY_ARROW_LEFT: number = 2014;
+const KEY_ARROW_RIGHT: number = 2015;
 /** How often the working copies are compared with the files the user picked (ms). */
 const COPY_OUT_INTERVAL_MS: number = 500;
 
@@ -165,6 +174,12 @@ struct Index {
   /** What each working copy looked like when it was last written back (`size:mtime`). */
   private synced: Map<string, string> = new Map<string, string>();
   private copyTimer: number = -1;
+  /**
+   * The platform input method, attached to the self-drawn document while it has a caret: the
+   * canvas is not a text component, so nothing else would bring up the soft keyboard.
+   */
+  private ime: inputMethod.InputMethodController = inputMethod.getController();
+  private imeAttached: boolean = false;
 
   aboutToAppear(): void {
     const context: common.UIAbilityContext | undefined = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -537,6 +552,158 @@ struct Index {
     return JSON.stringify({ ok: true });
   }
 
+  /**
+   * Keep the input method where the document is: attach it when a caret appears (a soft keyboard
+   * and the Chinese IME), move its candidate window to the caret, and detach when there is nothing
+   * to type into.
+   */
+  private followCaret(): void {
+    if (native.caretPresent() === 0) {
+      this.detachInputMethod();
+      return;
+    }
+    if (!this.imeAttached) {
+      this.attachInputMethod();
+    } else {
+      this.updateCursor();
+    }
+  }
+
+  /** Attach the input method (the keyboard comes up) and listen for what it sends. */
+  private attachInputMethod(): void {
+    const cursor = this.cursorInfo();
+    // The composition (pinyin before it becomes characters) arrives as preview text, which has to
+    // be subscribed before attaching. The document draws committed text; drawing the preview
+    // inline is the next step (docs/platform-ohos.md).
+    this.ime.on('setPreviewText', (text: string, range: inputMethod.Range) => {
+      hilog.info(DOMAIN, TAG, 'input method preview: %{public}s (%{public}d-%{public}d)', text, range.start, range.end);
+      native.ime(true);
+    });
+    this.ime.on('finishTextPreview', () => native.ime(false));
+    this.ime
+      .attach(true, {
+        inputAttribute: { textInputType: inputMethod.TextInputType.TEXT, enterKeyType: inputMethod.EnterKeyType.DONE },
+        cursorInfo: cursor,
+      })
+      .then(() => {
+        this.imeAttached = true;
+        hilog.info(DOMAIN, TAG, 'input method attached at (%{public}d, %{public}d)', cursor.left, cursor.top);
+        this.listenInputMethod();
+      })
+      .catch((err: Error) => {
+        hilog.error(DOMAIN, TAG, 'input method attach failed: %{public}s', JSON.stringify(err));
+      });
+  }
+
+  /** What the input method sends while it is attached: text, deletions, Enter, cursor moves. */
+  private listenInputMethod(): void {
+    this.ime.on('insertText', (text: string) => this.insertText(text));
+    this.ime.on('deleteLeft', (length: number) => this.deleteBackward(length));
+    this.ime.on('deleteRight', (length: number) => this.deleteForward(length));
+    this.ime.on('sendFunctionKey', (key: inputMethod.FunctionKey) => {
+      // Enter, Go, Search and Done all mean "a new line" in a document.
+      this.pressKey(KEY_ENTER);
+    });
+    this.ime.on('moveCursor', (direction: inputMethod.Direction) => {
+      if (direction === inputMethod.Direction.CURSOR_LEFT) {
+        this.pressKey(KEY_ARROW_LEFT);
+      } else if (direction === inputMethod.Direction.CURSOR_RIGHT) {
+        this.pressKey(KEY_ARROW_RIGHT);
+      } else if (direction === inputMethod.Direction.CURSOR_UP) {
+        this.pressKey(KEY_ARROW_UP);
+      } else if (direction === inputMethod.Direction.CURSOR_DOWN) {
+        this.pressKey(KEY_ARROW_DOWN);
+      }
+    });
+    this.ime.on('sendKeyboardStatus', (status: inputMethod.KeyboardStatus) => {
+      if (status === inputMethod.KeyboardStatus.HIDE) {
+        this.detachInputMethod();
+      }
+    });
+  }
+
+  /** Stop listening and let go of the input method (no keyboard, no candidate window). */
+  private detachInputMethod(): void {
+    if (!this.imeAttached) {
+      return;
+    }
+    this.imeAttached = false;
+    try {
+      this.ime.off('insertText');
+      this.ime.off('deleteLeft');
+      this.ime.off('deleteRight');
+      this.ime.off('sendFunctionKey');
+      this.ime.off('moveCursor');
+      this.ime.off('setPreviewText');
+      this.ime.off('finishTextPreview');
+      this.ime.off('sendKeyboardStatus');
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'input method off: %{public}s', JSON.stringify(err));
+    }
+    this.ime
+      .detach()
+      .then(() => hilog.info(DOMAIN, TAG, 'input method detached'))
+      .catch((err: Error) => hilog.warn(DOMAIN, TAG, 'input method detach: %{public}s', JSON.stringify(err)));
+  }
+
+  /** Tell the input method where the caret is, so its candidate window sits there (pixels). */
+  private updateCursor(): void {
+    const cursor = this.cursorInfo();
+    this.ime.updateCursor(cursor).catch((err: Error) => hilog.warn(DOMAIN, TAG, 'updateCursor: %{public}s', JSON.stringify(err)));
+  }
+
+  /** The caret in screen pixels (the input method's units). */
+  private cursorInfo(): inputMethod.CursorInfo {
+    const d: number = density();
+    const left: number = Math.round(native.caretX() * d);
+    const top: number = Math.round(native.caretY() * d);
+    const height: number = Math.max(1, Math.round(native.caretHeight() * d));
+    return { left: left, top: top, width: 1, height: height };
+  }
+
+  /** Text from the input method: one character per call into the document. */
+  private insertText(text: string): void {
+    for (let i = 0; i < text.length; i++) {
+      const cp: number = text.codePointAt(i) ?? 0;
+      if (cp > 0xffff) {
+        i++; // a surrogate pair was one character
+      }
+      if (cp > 0) {
+        native.text(cp);
+      }
+    }
+    this.afterInput();
+  }
+
+  /** Backspace, `length` times. */
+  private deleteBackward(length: number): void {
+    this.pressKey(KEY_BACKSPACE, Math.max(1, length));
+    this.afterInput();
+  }
+
+  /** Delete, `length` times. */
+  private deleteForward(length: number): void {
+    this.pressKey(KEY_DELETE, Math.max(1, length));
+    this.afterInput();
+  }
+
+  /** A hardware-style key press: down, then up. */
+  private pressKey(keyCode: number, times: number = 1): void {
+    for (let i = 0; i < times; i++) {
+      native.key(keyCode, true, false, 0, '');
+      native.key(keyCode, false, false, 0, '');
+    }
+  }
+
+  /** The document moved the caret: keep the candidate window with it. */
+  private afterInput(): void {
+    if (native.caretPresent() === 0) {
+      this.detachInputMethod();
+    } else if (this.imeAttached) {
+      this.updateCursor();
+    }
+  }
+
   private stopFrames(): void {
     if (this.sync !== undefined) {
       this.sync.stop();
@@ -554,7 +721,10 @@ struct Index {
         .focusOnTouch(true)
         .defaultFocus(true)
         .onFocus(() => native.focus(true))
-        .onBlur(() => native.focus(false))
+        .onBlur(() => {
+          native.focus(false);
+          this.detachInputMethod();
+        })
         .onTouch((event: TouchEvent) => {
           // `touches` is empty on Up/Cancel in some versions; the changed touch is always there.
           const touch: TouchObject | undefined =
@@ -571,6 +741,10 @@ struct Index {
             kind = POINTER_CANCEL;
           }
           native.pointer(kind, touch.x, touch.y, BUTTON_NONE, 0);
+          // A tap that put a caret in the document is a request to type: bring up the keyboard.
+          if (kind === POINTER_UP) {
+            this.followCaret();
+          }
         })
         .onMouse((event: MouseEvent) => {
           native.pointer(mouseKind(event.action), event.x, event.y, mouseButton(event.button), modifierBits(event));

@@ -148,6 +148,32 @@ pub extern "C" fn wc_text(codepoint: u32) {
     }
 }
 
+// --- the text caret, for the platform's input method -------------------------------------------
+
+/// `1` when the document is editing text (a caret is on screen), `0` otherwise.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_caret_present() -> i32 {
+    with(0, |app| i32::from(app.caret().is_some()))
+}
+
+/// The caret's x in points, or 0 when there is none.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_caret_x() -> f32 {
+    with(0.0, |app| app.caret().map_or(0.0, |(x, _, _)| x))
+}
+
+/// The caret's y in points (its top), or 0 when there is none.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_caret_y() -> f32 {
+    with(0.0, |app| app.caret().map_or(0.0, |(_, y, _)| y))
+}
+
+/// The height of the caret's line in points, or 0 when there is none.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_caret_height() -> f32 {
+    with(0.0, |app| app.caret().map_or(0.0, |(_, _, height)| height))
+}
+
 /// The input method started (`1`) or finished (`0`) composing.
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_ime(composing: i32) {

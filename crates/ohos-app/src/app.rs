@@ -75,6 +75,11 @@ pub struct App {
     previous: Vec<(u64, egui::Rect)>,
     /// The part of the frame that changed since the previous one, in points (`None`: all of it).
     damage: Option<egui::Rect>,
+    /// Where the text caret is, in points, refreshed after every UI pass: the platform's input
+    /// method puts its candidate window here (and its absence means no text is being typed).
+    caret: Option<egui::Pos2>,
+    /// The height of the caret's line, in points.
+    caret_height: f32,
 }
 
 impl App {
@@ -114,6 +119,8 @@ impl App {
             timings: FrameTimings::default(),
             previous: Vec::new(),
             damage: None,
+            caret: None,
+            caret_height: 0.0,
             config,
             notes,
         };
@@ -136,6 +143,12 @@ impl App {
 
     pub fn frames(&self) -> u64 {
         self.frames
+    }
+
+    /// Where the text caret is in points (x, y) and how tall its line is, for the platform's input
+    /// method; `None` when no text is being edited.
+    pub fn caret(&self) -> Option<(f32, f32, f32)> {
+        self.caret.map(|pos| (pos.x, pos.y, self.caret_height))
     }
 
     pub fn events(&self) -> u64 {
@@ -372,6 +385,10 @@ impl App {
             ui.ui(root);
         });
         let ui_ms = started.elapsed().as_secs_f32() * 1000.0;
+        // Where the input method's candidate window belongs: the caret, when the document has one.
+        let caret = wordcraft_ui_egui::canvas::caret_screen(&mut self.ui);
+        self.caret = caret.map(|(pos, _)| pos);
+        self.caret_height = caret.map_or(0.0, |(_, height)| height);
 
         // Textures must land before the meshes that sample them, and the delta must be emptied
         // once applied (egui's Drop asserts on leftovers).

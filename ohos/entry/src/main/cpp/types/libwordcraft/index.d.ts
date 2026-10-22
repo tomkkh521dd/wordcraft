@@ -22,6 +22,15 @@ export const focus: (focused: boolean) => void;
 
 /** 1 when a frame was presented. */
 export const render: () => number;
+/** 1 when the document is editing text (a caret is on screen). */
+export const caretPresent: () => number;
+/** The caret's x in points (vp), for the input method's candidate window. */
+export const caretX: () => number;
+/** The caret's top y in points (vp). */
+export const caretY: () => number;
+/** The height of the caret's line in points (vp). */
+export const caretHeight: () => number;
+
 /** The next request from the Rust side (a JSON string), or null. Poll it once per frame. */
 export const hostTake: () => string | null;
 /** Answer a request: a JSON object with the result, or `{error}`, or `{cancelled: true}`. */

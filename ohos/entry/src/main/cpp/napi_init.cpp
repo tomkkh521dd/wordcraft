@@ -318,6 +318,30 @@ napi_value Text(napi_env env, napi_callback_info info) {
     return Undefined(env);
 }
 
+/* caretPresent() -> 1 when the document is editing text */
+napi_value CaretPresent(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_caret_present());
+}
+
+/* caretX() -> the caret's x in points */
+napi_value CaretX(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_caret_x());
+}
+
+/* caretY() -> the caret's top y in points */
+napi_value CaretY(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_caret_y());
+}
+
+/* caretHeight() -> how tall the caret's line is, in points */
+napi_value CaretHeight(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_caret_height());
+}
+
 napi_value Ime(napi_env env, napi_callback_info info) {
     napi_value argv[1];
     if (!ArgCount(env, info, argv, 1)) {
@@ -434,6 +458,10 @@ napi_value Init(napi_env env, napi_value exports) {
         {"focus", nullptr, Focus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, Render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"caretPresent", nullptr, CaretPresent, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"caretX", nullptr, CaretX, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"caretY", nullptr, CaretY, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"caretHeight", nullptr, CaretHeight, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"hostTake", nullptr, HostTake, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"hostAnswer", nullptr, HostAnswer, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"destroy", nullptr, Destroy, nullptr, nullptr, nullptr, napi_default, nullptr},

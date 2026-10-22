@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -17,7 +17,7 @@ files the port touches**.
 | The document UI (egui) on the surface | ✅ done: ribbon, ruler, pages, tables, lists, status bar |
 | Platform services: system font folders, locale, dark mode | ✅ done |
 | Platform services: file picker (open, save), clipboard (text, HTML, pictures) | ✅ done and verified on the emulator (see *Platform services*) |
-| Input method (soft keyboard, Chinese IME, candidate window) | ⏳ next (OHOS.5) |
+| Input method (soft keyboard, Chinese IME, candidate window) | ✅ first version (OHOS.5a): attach, insert, delete, Enter, cursor moves; the candidate window at the caret; composing text not yet drawn inline |
 | Packaging (signed HAP), AppGallery | ⏳ planned (OHOS.6) |
 
 The desktop shell (`apps/wordcraft`, eframe/winit) is **not** used on HarmonyOS: winit has no
@@ -216,6 +216,10 @@ HUAWEI BKY-W00, HarmonyOS 6.1.0.135 (API 24), 1840×2650 at 2.25×, 703 system f
 | Clipboard | Ctrl+C wrote 2021 text chars + 4010 HTML chars; Ctrl+V read them back (`2 record(s) … text/html,text/plain`) |
 | Clipboard from another app | copied 236 chars in 备忘录 and pasted them into WordCraft: `clipboard read: 1 record(s), 236 text chars, text/plain` — **no `READ_PASTEBOARD` grant was requested**, so HarmonyOS 6.1 allowed it (the permission is what the API documents; check it again on release firmware) |
 | Keys | an injected F11 arrived with the text `K`, and Ctrl+A/Ctrl+S likewise: only keys that can type now carry a character |
+| Input method | a tap in the document attached the platform input method at the caret (`input method attached at (869, 1223)`), the soft keyboard came up and the window re-laid out above it |
+| English typing | tapping the keyboard's keys inserted `Gekko` into the document through `insertText` |
+| Chinese typing | switched the keyboard to 拼音, typed `ni` → candidates 呢 拟 你 …, chose 呢: the character went into the document through the same `insertText` |
+| IME keys | Backspace arrived as `deleteLeft` and inserted two `2055` key presses; `完成` (Done) arrived as `sendFunctionKey` and inserted `Enter` (`2054`) |
 
 A real device adds one finding the emulator hid: **`keyText` is unreliable for injected and
 chorded keys in general**, not only for modifiers — an F11 carried the text `K`. Text is accepted
@@ -247,9 +251,20 @@ Two things only a device shows, both handled:
   (`crates/engine/src/recovery/desktop.rs`) work as on Linux. The grant lasts for the session;
   a document kept for the next start would need `fileshare.persistPermission` on its URI.
 - **Keys.** The character a key produced travels with the key (`wc_key(…, text)`), and Rust
-  decides whether it types: a Ctrl or Meta chord never does. ArkUI's `keyText` cannot be trusted
-  while a modifier is held (Ctrl+S arrived as `K`), and a shortcut that types would corrupt the
+  decides whether it types: a Ctrl or Meta chord never does, and only key codes that can type
+  carry a character at all. ArkUI's `keyText` cannot be trusted for chords or injected keys
+  (Ctrl+S and an injected F11 both arrived as `K`), and a shortcut that types would corrupt the
   document. Input-method text has its own entry (`wc_text`).
+- **Input method.** The document is a self-drawn canvas, so the platform's text components never
+  see a tap and no keyboard would appear. ArkTS binds the canvas to the input method itself
+  (`inputMethod.getController().attach(...)`) whenever a tap leaves a caret (`wc_caret_present`,
+  from `canvas::caret_screen`), and passes the caret in pixels (`wc_caret_x/y/height`) so the
+  candidate window sits where the text goes. While attached it listens for `insertText` (one
+  `wc_text` per character), `deleteLeft`/`deleteRight` (Backspace and Delete presses),
+  `sendFunctionKey` (Enter) and `moveCursor` (arrow keys), re-syncs the cursor after every insert,
+  and detaches when the caret goes or the window loses focus. The composing text (pinyin before it
+  becomes characters) arrives as preview text: it is logged and marked as composing, but not yet
+  drawn inside the page, so the keyboard's own inline bubble is what shows while composing.
 - **Rendering.** Pages are rasterised on the CPU by `vello_cpu` (`crates/render`); the shell
   composites egui's triangles on the CPU as well and hands finished frames to the native window
   buffer (`OH_NativeWindow_NativeWindowRequestBuffer` → copy → `FlushBuffer`). No GPU context is
@@ -266,8 +281,11 @@ Two things only a device shows, both handled:
 - Frame rate: about 5 fps at 1920×2799 (paint 50.4 ms of a painted frame). The software
   rasteriser is the bottleneck; row-wise fills, a 1:1 blit for page bitmaps and dirty rectangles
   are the next work.
-- Input method: no `inputMethod.attach` yet, so the soft keyboard and the Chinese IME do not
-  reach the document (OHOS.5). Hardware keys work.
+- Input method, what is still missing: the composing (preview) text is not drawn inline in the
+  page — the keyboard shows it in its own bubble — so pinyin is chosen from the candidate bar
+  without WordCraft showing the letters at the caret. Selection is not synchronised either (no
+  `changeSelection`/`getLeftTextOfCursor`), so IME-driven select-all, cut and copy have nothing to
+  act on, and scrolling while typing only moves the candidate window at the next keystroke.
 - Clipboard pictures: the read path (packed PNG) and the paste path are unit-tested, but no device
   test has pasted a copied picture yet (a copy from 图库 or a file manager would exercise it).
   Reading another app's text worked without the restricted `ohos.permission.READ_PASTEBOARD` on
@@ -287,6 +305,7 @@ Two things only a device shows, both handled:
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | minor | OHOS.5a: the system input method is bound to the self-drawn canvas — a tap brings up the soft keyboard at the caret, English and Chinese (拼音 candidate) text land in the document, Backspace/Delete/Enter/arrow moves are wired, the candidate window follows the caret; composing text is not yet drawn inline |
 | 2026-10-22 | minor | A real tablet (BKY-W00, HarmonyOS 6.1.0, 2.25×): the UI, the picker and the clipboard verified there; a paste of another app's copy worked without `READ_PASTEBOARD`; only keys that can type carry a character (an injected F11 brought `K`); the working copy takes the file name the user typed |
 | 2026-10-22 | minor | Platform services: the system file picker and the clipboard through a Rust→ArkTS request bridge; documents are opened and saved through sandbox working copies because a picker grants a file and not its folder (a save's sibling temporary file is refused, `13900012`), with the finished file copied back over the picked URI; open → edit → save → reopen and copy/paste verified on the emulator; Ctrl+S no longer types `K` |
 | 2026-10-21 | minor | Chinese interface on the device: HarmonyOS ships `HarmonyOS_Sans_SC/TC.ttf`, not Noto or Source Han, so the interface CJK fallback found nothing and every label drew as a box; the kana in the Translate icon falls back to Inter's `α` where no face has kana, guarded by a test that sweeps every ribbon icon's characters |

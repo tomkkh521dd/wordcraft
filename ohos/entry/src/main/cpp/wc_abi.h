@@ -42,6 +42,15 @@ void wc_scroll(float dx, float dy);
 void wc_key(int32_t code, int32_t pressed, int32_t repeated, int32_t modifiers, uint32_t text);
 void wc_text(uint32_t codepoint);
 void wc_ime(int32_t composing);
+
+/* --- the text caret: where the input method's candidate window belongs ---------------------- */
+
+/* 1 when the document is editing text (a caret is on screen), 0 otherwise. */
+int32_t wc_caret_present(void);
+/* The caret's x and top y in points, and the height of its line (all 0 when there is no caret). */
+float wc_caret_x(void);
+float wc_caret_y(void);
+float wc_caret_height(void);
 void wc_focus(int32_t focused);
 
 /* --- frames -------------------------------------------------------------- */

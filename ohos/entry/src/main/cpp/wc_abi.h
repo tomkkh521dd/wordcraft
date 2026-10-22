@@ -42,6 +42,10 @@ void wc_scroll(float dx, float dy);
 void wc_key(int32_t code, int32_t pressed, int32_t repeated, int32_t modifiers, uint32_t text);
 void wc_text(uint32_t codepoint);
 void wc_ime(int32_t composing);
+/* The composing text (UTF-8, borrowed for this call; the UI draws it at the caret). */
+void wc_ime_preview(const uint8_t *text, size_t len);
+/* The committed text (UTF-8, borrowed for this call): one undoable insert. */
+void wc_ime_commit(const uint8_t *text, size_t len);
 
 /* --- the text caret: where the input method's candidate window belongs ---------------------- */
 

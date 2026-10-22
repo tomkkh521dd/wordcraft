@@ -149,6 +149,22 @@ fn a_shortcut_never_types_its_key_text() {
 }
 
 #[test]
+fn input_method_text_arrives_as_preedit_then_commit() {
+    // The composing text must reach egui as a Preedit event (the document draws it at the caret,
+    // underlined) and the committed text as one Commit — not as a burst of separate characters.
+    let mut app = App::new();
+    app.ime_preedit("nihao");
+    app.ime_commit("你好");
+    let events = app.pending_events().to_vec();
+    assert!(matches!(&events[0], Event::Ime(egui::ImeEvent::Preedit { text, .. }) if text == "nihao"), "{events:?}");
+    assert!(matches!(&events[1], Event::Ime(egui::ImeEvent::Commit(text)) if text == "你好"), "{events:?}");
+    // An empty commit is not an edit (a keyboard that sends "" must not clear anything).
+    app.ime_commit("");
+    assert_eq!(app.pending_events().len(), 2);
+    assert!(app.typed().is_empty(), "IME text is not typed character by character");
+}
+
+#[test]
 fn keys_map_to_egui_and_text_arrives_separately() {
     let mut app = App::new();
     // ArkUI: 2035 = S, 2054 = Enter, 2012 = ArrowUp, 2090 = F1.

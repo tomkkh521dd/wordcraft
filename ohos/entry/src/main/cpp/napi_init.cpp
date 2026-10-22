@@ -342,6 +342,36 @@ napi_value CaretHeight(napi_env env, napi_callback_info info) {
     return Number(env, wc_caret_height());
 }
 
+/* imePreview(text): the composing text, drawn at the caret until the commit replaces it */
+napi_value ImePreview(napi_env env, napi_callback_info info) {
+    napi_value argv[1];
+    if (!ArgCount(env, info, argv, 1)) {
+        return Undefined(env);
+    }
+    std::string text;
+    if (!ReadString(env, argv[0], text)) {
+        WC_LOGW("the input method's preview is not a string");
+        return Undefined(env);
+    }
+    wc_ime_preview(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+    return Undefined(env);
+}
+
+/* imeCommit(text): the committed text, one undoable insert */
+napi_value ImeCommit(napi_env env, napi_callback_info info) {
+    napi_value argv[1];
+    if (!ArgCount(env, info, argv, 1)) {
+        return Undefined(env);
+    }
+    std::string text;
+    if (!ReadString(env, argv[0], text)) {
+        WC_LOGW("the input method's text is not a string");
+        return Undefined(env);
+    }
+    wc_ime_commit(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+    return Undefined(env);
+}
+
 napi_value Ime(napi_env env, napi_callback_info info) {
     napi_value argv[1];
     if (!ArgCount(env, info, argv, 1)) {
@@ -458,6 +488,8 @@ napi_value Init(napi_env env, napi_value exports) {
         {"focus", nullptr, Focus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, Render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"imePreview", nullptr, ImePreview, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"imeCommit", nullptr, ImeCommit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretPresent", nullptr, CaretPresent, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretX", nullptr, CaretX, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretY", nullptr, CaretY, nullptr, nullptr, nullptr, napi_default, nullptr},

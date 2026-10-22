@@ -148,6 +148,43 @@ pub extern "C" fn wc_text(codepoint: u32) {
     }
 }
 
+// --- the input method's text -------------------------------------------------------------------
+
+/// The composing text (pinyin before it becomes characters): `text`/`len` is UTF-8, borrowed for
+/// this call. The UI draws it at the caret until the commit replaces it.
+///
+/// # Safety
+///
+/// `text` must point to `len` readable bytes, as `wc_abi.h` says; nothing here keeps the pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wc_ime_preview(text: *const u8, len: usize) {
+    if text.is_null() || len == 0 {
+        return;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(text, len) };
+    match std::str::from_utf8(bytes) {
+        Ok(preedit) => with((), |app| app.ime_preedit(preedit)),
+        Err(e) => log::warn!("the input method's preview is not UTF-8: {e}"),
+    }
+}
+
+/// The committed text (UTF-8, borrowed for this call): one undoable insert.
+///
+/// # Safety
+///
+/// `text` must point to `len` readable bytes, as `wc_abi.h` says; nothing here keeps the pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wc_ime_commit(text: *const u8, len: usize) {
+    if text.is_null() || len == 0 {
+        return;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(text, len) };
+    match std::str::from_utf8(bytes) {
+        Ok(committed) => with((), |app| app.ime_commit(committed)),
+        Err(e) => log::warn!("the input method's text is not UTF-8: {e}"),
+    }
+}
+
 // --- the text caret, for the platform's input method -------------------------------------------
 
 /// `1` when the document is editing text (a caret is on screen), `0` otherwise.

@@ -22,6 +22,11 @@ export const focus: (focused: boolean) => void;
 
 /** 1 when a frame was presented. */
 export const render: () => number;
+/** The input method's composing text: drawn at the caret until the commit replaces it. */
+export const imePreview: (text: string) => void;
+/** The input method's committed text: one undoable insert. */
+export const imeCommit: (text: string) => void;
+
 /** 1 when the document is editing text (a caret is on screen). */
 export const caretPresent: () => number;
 /** The caret's x in points (vp), for the input method's candidate window. */

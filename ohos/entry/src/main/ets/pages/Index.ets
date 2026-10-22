@@ -576,10 +576,11 @@ struct Index {
     // be subscribed before attaching. The document draws committed text; drawing the preview
     // inline is the next step (docs/platform-ohos.md).
     this.ime.on('setPreviewText', (text: string, range: inputMethod.Range) => {
-      hilog.info(DOMAIN, TAG, 'input method preview: %{public}s (%{public}d-%{public}d)', text, range.start, range.end);
-      native.ime(true);
+      // Composing text (pinyin before it becomes characters): the document draws it at the caret,
+      // underlined, exactly as it does for the desktop's IME input.
+      native.imePreview(text);
     });
-    this.ime.on('finishTextPreview', () => native.ime(false));
+    this.ime.on('finishTextPreview', () => native.imePreview(''));
     this.ime
       .attach(true, {
         inputAttribute: { textInputType: inputMethod.TextInputType.TEXT, enterKeyType: inputMethod.EnterKeyType.DONE },
@@ -661,17 +662,12 @@ struct Index {
     return { left: left, top: top, width: 1, height: height };
   }
 
-  /** Text from the input method: one character per call into the document. */
+  /** Text from the input method: one commit into the document (one undo step per word). */
   private insertText(text: string): void {
-    for (let i = 0; i < text.length; i++) {
-      const cp: number = text.codePointAt(i) ?? 0;
-      if (cp > 0xffff) {
-        i++; // a surrogate pair was one character
-      }
-      if (cp > 0) {
-        native.text(cp);
-      }
+    if (text === '') {
+      return;
     }
+    native.imeCommit(text);
     this.afterInput();
   }
 

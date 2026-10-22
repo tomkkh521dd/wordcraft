@@ -354,6 +354,22 @@ impl App {
         self.count(format!("ime {}", if composing { "composing" } else { "committed" }));
     }
 
+    /// The input method's composing text (pinyin before it becomes characters). The UI draws it
+    /// at the caret, underlined, until [`Self::ime_commit`] replaces it with the characters.
+    pub fn ime_preedit(&mut self, text: &str) {
+        self.raw.events.push(Event::Ime(egui::ImeEvent::Preedit { text: text.to_string(), active_range_chars: None }));
+        self.count(format!("ime preedit {text:?}"));
+    }
+
+    /// The input method's committed text: one undoable insert, however many characters.
+    pub fn ime_commit(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.raw.events.push(Event::Ime(egui::ImeEvent::Commit(text.to_string())));
+        self.count(format!("ime commit {text:?}"));
+    }
+
     fn count(&mut self, what: String) {
         self.events = self.events.saturating_add(1);
         if self.events <= 40 || self.events.is_multiple_of(120) {

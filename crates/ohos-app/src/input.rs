@@ -129,6 +129,23 @@ pub struct KeyEvent {
     pub text: Option<char>,
 }
 
+/// Whether a key can produce text on its own: letters, digits, the typing punctuation and space.
+///
+/// ArkUI's `keyText` cannot be trusted for the others — an injected F11 arrived as `K` on a
+/// tablet, and Ctrl+S as `K` on an emulator — so text from a function key, an arrow or a chord is
+/// refused. Input-method text has its own entry (`wc_text`), so nothing is lost.
+pub fn types_text(code: i32) -> bool {
+    matches!(
+        code,
+        2000..=2009     // 0–9
+        | 2017..=2042   // A–Z
+        | 2043 | 2044   // , .
+        | 2050          // space
+        | 2056..=2064   // ` - = [ ] \ ; ' /
+        | 2066          // +
+    )
+}
+
 /// ArkUI's `KeyCode` → egui's logical key. `None` for keys egui has no name for (media, volume,
 /// the modifier keys themselves — those travel as [`modifiers`] bits).
 pub fn egui_key(code: i32) -> Option<egui::Key> {

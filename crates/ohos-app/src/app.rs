@@ -314,11 +314,12 @@ impl App {
             if mods.is_empty() { "" } else { " " },
             mods
         ));
-        // Ctrl and Meta make a shortcut, never text: ArkUI's `keyText` is unreliable while a
-        // modifier is held (on the emulator Ctrl+S arrived with the text 'K'), and a shortcut that
-        // types something would corrupt the document.
+        // Ctrl and Meta make a shortcut, never text, and only keys that can type carry a
+        // character: ArkUI's `keyText` is unreliable for both (Ctrl+S and an injected F11 both
+        // arrived with the text 'K'). A shortcut that types would corrupt the document.
         let shortcut = event.modifiers & (modifiers::CTRL | modifiers::META) != 0;
-        if let Some(c) = event.text.filter(|_| event.pressed && !shortcut) {
+        let types = input::types_text(event.code);
+        if let Some(c) = event.text.filter(|_| event.pressed && !shortcut && types) {
             self.text(c);
         }
     }

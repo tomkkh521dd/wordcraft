@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (platform services on the device: the system file picker and the clipboard, edited through working copies because a picker grants a file and not its folder — open, save, reopen and paste verified on the emulator; a shortcut no longer types its key text; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -76,10 +76,12 @@ the desktop takes. Writing puts the text and the HTML alternative on the picker-
 in one `PasteData`. HarmonyOS has no MathML clipboard record, so a copied equation arrives in
 other programs as its HTML/text.
 
-Reading another app's clipboard needs `ohos.permission.READ_PASTEBOARD`, a *restricted* user grant
-that AppGallery approves per app; copying and pasting inside WordCraft needs none. Until it is
-granted the app keeps its own last copy in the cache, so in-app copy and paste work and a failed
-read never silently empties the clipboard.
+The API documents `ohos.permission.READ_PASTEBOARD` (a *restricted* user grant that AppGallery
+approves per app) for reading another program's clipboard. On the test tablet (HarmonyOS 6.1.0) a
+paste of a 备忘录 copy worked with no permission declared, so the grant is not needed there; if a
+firmware or a release signature refuses the read, the app keeps its own last copy in the cache, so
+in-app copy and paste keep working and a failed read never silently empties the clipboard. Verify
+this again on release firmware before shipping.
 
 ## The project
 
@@ -200,6 +202,26 @@ Three things only a device showed, all handled:
 - **`keyText` is not the key's character while a modifier is held**: Ctrl+S arrives with the text
   `K`. Rust decides what types, not the platform (see *Platform notes*, Keys).
 
+### Verified on a real tablet
+
+HUAWEI BKY-W00, HarmonyOS 6.1.0.135 (API 24), 1840×2650 at 2.25×, 703 system font faces,
+`karl.hmsoft.wordcraft` installed with DevEco's debug signature:
+
+| What | Result |
+|---|---|
+| The interface | the ribbon in Chinese at 2.25×, the ruler, the sample document with its table and lists, the status bar |
+| Frames | 7172 triangles, 3.7M/17.0M px blitted, 9 textures; ui 1.2 ms, tessellate 0.2 ms, paint 46.2 ms — the same wall as the emulator: the rasteriser, not the CPU class |
+| File picker | Ctrl+O opened `选择文件`; Ctrl+S opened `选择路径` on the user's own folder list |
+| Save | saved as `WordCraft-name-check.docx` in 个人: the working copy took the typed name, and 10,593 bytes were copied back over the picked URI |
+| Clipboard | Ctrl+C wrote 2021 text chars + 4010 HTML chars; Ctrl+V read them back (`2 record(s) … text/html,text/plain`) |
+| Clipboard from another app | copied 236 chars in 备忘录 and pasted them into WordCraft: `clipboard read: 1 record(s), 236 text chars, text/plain` — **no `READ_PASTEBOARD` grant was requested**, so HarmonyOS 6.1 allowed it (the permission is what the API documents; check it again on release firmware) |
+| Keys | an injected F11 arrived with the text `K`, and Ctrl+A/Ctrl+S likewise: only keys that can type now carry a character |
+
+A real device adds one finding the emulator hid: **`keyText` is unreliable for injected and
+chorded keys in general**, not only for modifiers — an F11 carried the text `K`. Text is accepted
+only from key codes that type (letters, digits, typing punctuation, space) and never from a
+Ctrl/Meta chord; input-method text has its own entry, so nothing is lost.
+
 Two things only a device shows, both handled:
 
 - **`BufferHandle.virAddr` is null** on this emulator. The documented CPU path is to `mmap` the
@@ -247,8 +269,9 @@ Two things only a device shows, both handled:
 - Input method: no `inputMethod.attach` yet, so the soft keyboard and the Chinese IME do not
   reach the document (OHOS.5). Hardware keys work.
 - Clipboard pictures: the read path (packed PNG) and the paste path are unit-tested, but no device
-  test has pasted a copied picture yet; reading *another* app's clipboard needs the restricted
-  `ohos.permission.READ_PASTEBOARD` grant, which AppGallery approves per app.
+  test has pasted a copied picture yet (a copy from 图库 or a file manager would exercise it).
+  Reading another app's text worked without the restricted `ohos.permission.READ_PASTEBOARD` on
+  the test tablet; confirm that on release firmware.
 - Pictures dragged from the file manager paste as text (the URIs reach the engine as plain text;
   the picture-file paste path exists for the desktop).
 - Recent files, autosave and recovery record sandbox paths, not the user's folders; the file name
@@ -264,6 +287,7 @@ Two things only a device shows, both handled:
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | minor | A real tablet (BKY-W00, HarmonyOS 6.1.0, 2.25×): the UI, the picker and the clipboard verified there; a paste of another app's copy worked without `READ_PASTEBOARD`; only keys that can type carry a character (an injected F11 brought `K`); the working copy takes the file name the user typed |
 | 2026-10-22 | minor | Platform services: the system file picker and the clipboard through a Rust→ArkTS request bridge; documents are opened and saved through sandbox working copies because a picker grants a file and not its folder (a save's sibling temporary file is refused, `13900012`), with the finished file copied back over the picked URI; open → edit → save → reopen and copy/paste verified on the emulator; Ctrl+S no longer types `K` |
 | 2026-10-21 | minor | Chinese interface on the device: HarmonyOS ships `HarmonyOS_Sans_SC/TC.ttf`, not Noto or Source Han, so the interface CJK fallback found nothing and every label drew as a box; the kana in the Translate icon falls back to Inter's `α` where no face has kana, guarded by a test that sweeps every ribbon icon's characters |
 | 2026-10-21 | minor | First frame verified on the emulator: RGBA order, stride, density, input and the engine all correct; `mmap` needed because `virAddr` is null; a changed signature needs an uninstall first |

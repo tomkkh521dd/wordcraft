@@ -317,7 +317,10 @@ struct Index {
       return JSON.stringify({ cancelled: true });
     }
     const uri: string = uris[0];
-    const copy: string = this.workingPath(name);
+    // The name the user typed in the dialog, not the suggested one: it is what the app shows.
+    const picked: string = this.filePath(uri);
+    const base: string = picked !== '' ? picked.substring(picked.lastIndexOf('/') + 1) : name;
+    const copy: string = this.workingPath(base !== '' ? base : name);
     if (copy === '') {
       return JSON.stringify({ error: 'the app has nowhere to keep the document' });
     }

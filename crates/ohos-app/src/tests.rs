@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use egui::{Event, Key, PointerButton};
 
 use crate::config::{Config, FONT_DIRS, LOCALE, SETTINGS_DIR, START, Start, THEME, Theme};
-use crate::input::{Button, KeyEvent, PointerKind, Scroll, egui_key, modifiers};
+use crate::input::{self, Button, KeyEvent, PointerKind, Scroll, egui_key, modifiers};
 use crate::{App, FrameNeeded};
 
 fn lookup(pairs: &[(&str, &str)]) -> impl FnMut(&str) -> Option<OsString> {
@@ -139,6 +139,13 @@ fn a_shortcut_never_types_its_key_text() {
     // A released key types nothing either.
     app.key(KeyEvent { code: 2017, pressed: false, repeated: false, modifiers: 0, text: Some('a') });
     assert_eq!(app.typed(), "@");
+    // A key that cannot type carries no character, whatever the platform says: an injected F11
+    // arrived with the text 'K' on a tablet.
+    app.key(KeyEvent { code: 2100, pressed: true, repeated: false, modifiers: 0, text: Some('K') });
+    app.key(KeyEvent { code: 2012, pressed: true, repeated: false, modifiers: 0, text: Some('k') });
+    assert_eq!(app.typed(), "@", "function and arrow keys type nothing");
+    assert!(input::types_text(2017) && input::types_text(2050) && input::types_text(2044));
+    assert!(!input::types_text(2100) && !input::types_text(2012) && !input::types_text(2054));
 }
 
 #[test]

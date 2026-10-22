@@ -6,6 +6,8 @@ import { inputMethod } from '@kit.IMEKit';
 import { i18n } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo, fileShare, fileUri, picker } from '@kit.CoreFileKit';
+import { systemShare } from '@kit.ShareKit';
+import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import { image } from '@kit.ImageKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { preferences } from '@kit.ArkData';
@@ -148,6 +150,7 @@ interface FingerMid {
 interface HostRequest {
   id: number;
   kind: string;
+  path?: string;
   purpose?: string;
   many?: boolean;
   name?: string;
@@ -362,6 +365,8 @@ struct Index {
       this.pickOpen(parsed).then((json: string) => answer(json)).catch(failed);
     } else if (parsed.kind === 'pickSave') {
       this.pickSave(parsed).then((json: string) => answer(json)).catch(failed);
+    } else if (parsed.kind === 'share') {
+      this.shareDocument(parsed).then((json: string) => answer(json)).catch(failed);
     } else if (parsed.kind === 'startupDocument') {
       this.startupDocument().then((json: string) => answer(json)).catch(failed);
     } else if (parsed.kind === 'clipboardRead') {
@@ -945,6 +950,34 @@ struct Index {
   private deleteForward(length: number): void {
     this.pressKey(KEY_DELETE, Math.max(1, length));
     this.afterInput();
+  }
+
+  /**
+   * File › Share: hand the document to HarmonyOS's share sheet. The user's own file is shared when
+   * the document came from one (its grant covers reading), otherwise the sandbox copy by file URI.
+   */
+  private async shareDocument(request: HostRequest): Promise<string> {
+    const path: string = request.path ?? '';
+    if (path === '') {
+      return JSON.stringify({ error: 'there is no document to share' });
+    }
+    // Make sure the user's file is current before it leaves the app.
+    this.copyWorkingCopies();
+    const target: string = this.targets.get(path) ?? fileUri.getUriFromPath(path);
+    const title: string = path.substring(path.lastIndexOf('/') + 1);
+    const data: systemShare.SharedData = new systemShare.SharedData({
+      utd: utd.UniformDataType.FILE,
+      uri: target,
+      title: title,
+    });
+    const controller: systemShare.ShareController = new systemShare.ShareController(data);
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    await controller.show(context, {
+      previewMode: systemShare.SharePreviewMode.DEFAULT,
+      selectionMode: systemShare.SelectionMode.SINGLE,
+    });
+    hilog.info(DOMAIN, TAG, 'share sheet shown for %{public}s', title);
+    return JSON.stringify({ ok: true });
   }
 
   /**

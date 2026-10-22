@@ -218,6 +218,13 @@ pub fn startup_document() -> Receiver<host::Reply> {
     host::host().request("startupDocument", json!({}))
 }
 
+/// Hand a document to the system's share sheet (HarmonyOS Share Kit). The answer comes later; this
+/// only queues the request, so File › Share never blocks a frame.
+pub fn share_document(path: &str) -> Result<(), String> {
+    let _ = host::host().request("share", json!({"path": path}));
+    Ok(())
+}
+
 /// What the file dialogs ask of the platform: a picker, answered later through the bridge.
 pub fn file_dialog(request: FileDialogRequest) -> Receiver<FileDialogAnswer> {
     let (kind, params) = match request {
@@ -257,6 +264,7 @@ pub fn services() -> wordcraft_ui_egui::Services {
         clipboard_formats: Some(Box::new(clipboard_formats)),
         clipboard_picture: Some(Box::new(clipboard_picture)),
         set_clipboard_html: Some(Box::new(set_clipboard_html)),
+        share_file: Some(Box::new(share_document)),
         ..Default::default()
     }
 }

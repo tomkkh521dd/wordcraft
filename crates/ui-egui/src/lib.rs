@@ -152,6 +152,10 @@ pub struct Services {
     /// as well, which Word reads a pasted equation from (#1297). `true` when the HTML and text are
     /// there; otherwise the copy's text goes through egui as usual.
     pub set_clipboard_html: Option<Box<dyn Fn(&str, &str, &str) -> bool>>,
+    /// A host that can hand a document to the system's share sheet (HarmonyOS: Share Kit): File ›
+    /// Share gives it the document's path instead of opening Save As with a hint. `// OHOS:` the
+    /// port's only addition to `Services`; the desktop leaves it unset and keeps its own behaviour.
+    pub share_file: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
     /// Desktop: the RTF on the system clipboard, where the platform offers it (#687).
     pub clipboard_rtf: Option<Box<dyn Fn() -> Option<String>>>,
     /// Desktop: the names of the formats on the system clipboard (MIME types, Windows format
@@ -852,6 +856,15 @@ impl WordApp {
         if id == "file.recover" && params.as_object().is_none_or(|p| p.is_empty()) {
             self.ui.backstage = true;
             self.ui.backstage_page = "recover".into();
+        }
+        // A host with a system share sheet (HarmonyOS) gets the document itself; everyone else keeps
+        // Save As with the hint that a copy can be shared.
+        if id == "file.share"
+            && let Some(share) = &self.services.share_file
+            && let Some(path) = self.session.path.as_ref()
+        {
+            let path = path.to_string_lossy().into_owned();
+            return share(&path).map(|()| json!({"shared": path}));
         }
         // A button whose command needs input the user hasn't given yet opens its dialog (#240).
         if let Some(name) = input_dialog(id, &params)

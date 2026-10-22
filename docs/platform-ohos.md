@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor ("Open with" from the file manager, and a verified copy-out that repairs a save killed mid-write on the next start; previously minor (files survive a restart: persisted file grants, the sandbox ↔ URI table and reopening the last document; previously minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (File › Share opens the system share sheet; previously minor ("Open with" from the file manager, and a verified copy-out that repairs a save killed mid-write on the next start; previously minor (files survive a restart: persisted file grants, the sandbox ↔ URI table and reopening the last document; previously minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -19,6 +19,7 @@ files the port touches**.
 | Platform services: file picker (open, save), clipboard (text, HTML, pictures) | ✅ done and verified on the emulator and a tablet |
 | Files across restarts: persisted grants (`FILE_ACCESS_PERSIST`), the sandbox ↔ URI table, reopening the last document, write-back compensation | ✅ verified on a tablet (OHOS.9a/b) |
 | "Open with" from the file manager (`.docx/.doc/.odt/.rtf/.md/.txt`) | ✅ verified on a tablet (OHOS.9b) |
+| System share (File › Share ▸ Share Kit) | ✅ verified on a tablet (OHOS.9c) |
 | Touch: pinch zoom, two-finger scroll with momentum, long-press context menu, drag selection, selection handle | ✅ (OHOS.8a/b): pinch scales the page (`view.zoom`, 10–500%), two-finger pan scrolls and flings, a still finger opens the document's context menu, and a draggable handle at the selection's end extends it with edge auto-scroll; the *anchor* handle is next |
 | Input method (soft keyboard, Chinese IME, candidate window) | ✅ first version (OHOS.5a/b): attach, commit (one undo step), delete, Enter, cursor moves; the candidate window at the caret; the composing text stays in the keyboard's own bubble (the platform sends no preview text to self-drawn clients) |
 | Packaging (signed HAP), AppGallery | ⏳ planned (OHOS.6) |
@@ -124,6 +125,8 @@ touched, all additively, each marked `// OHOS:` where the change is a branch or 
 | `xtask/src/main.rs` | one `match` arm; the command lives in the new `xtask/src/ohos.rs` | — |
 | `xtask/src/layers.rs` | two table entries: `ohos-app` at L6, `ohos` exempt | The layering check requires every crate to be classified |
 | `crates/fonts/src/ui_fallback.rs` | `HarmonyOS_Sans_SC.ttf`/`_TC.ttf` first among the interface CJK fallbacks | Devices ship no Noto/Source Han; without it a Chinese interface drew every label as a missing-glyph mark |
+| `crates/ui-egui/src/lib.rs` | `Services::share_file` (one field) and `file.share` using it when set | Only a host knows whether the platform has a share sheet |
+| `crates/ui-egui/src/ribbon.rs` | the 共享 button runs `file.share` when `share_file` is set, else opens Export | the button is UI, not the command |
 
 Deliberately **not** changed, because the host can do it instead:
 
@@ -233,6 +236,7 @@ HUAWEI BKY-W00, HarmonyOS 6.1.0.135 (API 24), 1840×2650 at 2.25×, 703 system f
 | Save survives a restart | saved `WordCraft-resume-test.docx` (10,594 bytes copied out, `kept the grant for the picked file`); force-stop, relaunch → `re-activated 1 persisted file grant(s)`, `last document: …documents/1/WordCraft-resume-test.docx`, `opening … at launch`; a bold change and Ctrl+S then wrote **10,600 bytes to the user's own file** |
 | "Open with" plumbing | `aa start … -U file://docs/…docx` reached the page (`asked to open …`) and became a working copy; reading it failed with `13900002` because an injected Want carries no grant — a file manager launch does |
 | "Open with" from Files | long-pressed the `.docx` in 文件管理 → 打开方式 listed **WordCraft**; choosing it produced `asked to open file://docs/…/WordCraft-resume-test.docx`, a working copy in `documents/2/`, and `opening … at launch` |
+| System share | pressing 共享 in the ribbon opened HarmonyOS's share sheet with `WordCraft-resume-test.docx · 10.6 KB` and its targets (华为分享, 备忘录, 邮件, 复制, 另存为 …); `share sheet shown for WordCraft-resume-test.docx` |
 | Write-back compensation | with the copy-out timer parked (a debug build) a save was left in the sandbox; the next start logged `wrote the document back … 10602 bytes` and `wrote back 1 document(s) that a previous run did not` **before** reopening the document |
 
 A real device adds one finding the emulator hid: **`keyText` is unreliable for injected and
@@ -259,6 +263,11 @@ Two things only a device shows, both handled:
   to what the device has.
 - **Settings and logs.** `wordcraft_control_key::set_settings_dir(context.filesDir + "/settings")`
   at start-up; `WORDCRAFT_PROFILE_DIR` still overrides it for isolated runs.
+- **Share.** File › Share (`file.share`) goes through a new `Services::share_file` hook: the shell is
+  handed the document's path, copies any pending change out first, and hands the **user's own file
+  URI** (or the sandbox path as a file URI when the document never came from a picker) to Share Kit
+  (`systemShare.SharedData` + `ShareController.show`). The ribbon's 共享 button runs `file.share`
+  when that hook is set and keeps opening the Export page otherwise, so the desktop is unchanged.
 - **Write-back safety.** A copy-out is written, then the picked file's size is checked against the copy's;
   on a mismatch it is written once more, and only a verified copy updates the `synced` marker (which
   is persisted). On the next start, any copy newer than its marker is written back before the
@@ -332,10 +341,9 @@ Two things only a device shows, both handled:
   ms). Text sampling (bilinear per glyph pixel) and repainting only the damaged part of a frame
   are the next work; `cargo run -p wordcraft-ui-paint --release --example bench` prints the
   per-case numbers.
-- Files, what is still missing: the system share sheet (so a document can leave the app through
-  分享), clipboard pictures on a device (the Rust side is unit-tested, the `packPicture` step has
-  only been exercised in code), Recent/autosave naming the user's folder rather than the sandbox
-  path, and a share/open of PDF exports.
+- Files, what is still missing: clipboard pictures on a device (the Rust side is unit-tested, the
+  `packPicture` step has only been exercised in code), sharing an exported PDF rather than the
+  document file, and Recent/autosave naming the user's folder rather than the sandbox path.
 - Touch, what is still missing: the *anchor* end's handle (only the end being edited has one, so
   extending backwards means re-dragging), a magnifier while dragging, a pinch that keeps the point
   under the fingers fixed (the view zooms around its own centre), momentum friction tuned on
@@ -366,6 +374,7 @@ Two things only a device shows, both handled:
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | minor | OHOS.9c system share: File › Share hands the document to HarmonyOS's share sheet (`Services::share_file` → Share Kit), and the ribbon's 共享 button uses it when a host provides one; verified on the tablet with the file name, size and targets in the sheet |
 | 2026-10-22 | minor | OHOS.9b: "Open with" declared for `.docx/.doc/.odt/.rtf/.md/.txt` (the file manager lists WordCraft; choosing it opened the document), and a copy-out is now verified (size checked, one retry) with the `synced` marker persisted — a copy left behind by a kill is written back at the next start, before the document reopens |
 | 2026-10-22 | minor | OHOS.9a file safety: a picked file's grant is persisted (`FILE_ACCESS_PERSIST`) and re-activated on the next launch, the sandbox ↔ URI table and the open document are kept in `preferences`, and the app reopens the document it had — so a save after a restart reaches the user's own file (verified: 10,600 bytes written back). "Open with" arrives as a `Want` URI and becomes a working copy; the manifest association is still to come |
 | 2026-10-22 | minor | OHOS.8b selection handle: a dot under the caret (18 vp on a 44 vp hit area), refreshed every frame, dragged with a Shift press so the anchor stays put, scrolling the page near its edges; `wc_selection_range` tells a caret from a selection. Also: the first Back now closes the keyboard instead of leaving the app |

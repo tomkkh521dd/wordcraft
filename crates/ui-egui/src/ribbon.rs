@@ -354,7 +354,14 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                         }
                         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, share));
                         if resp.on_hover_text(tl!("Export a copy to share (PDF, Word document)")).clicked() {
-                            let _ = app.run("ui.backstage", json!({"value": true, "page": "export"}));
+                            // A host with a system share sheet (HarmonyOS) shares the document itself;
+                            // everyone else gets the Export page to make a copy with.
+                            // `// OHOS:` the port's second addition to this file, keyed on the service.
+                            if app.services.share_file.is_some() && app.session.path.is_some() {
+                                let _ = app.run("file.share", json!({}));
+                            } else {
+                                let _ = app.run("ui.backstage", json!({"value": true, "page": "export"}));
+                            }
                         }
                         ui.add_space(6.0);
                         let track = app.session.doc.settings.track_changes;

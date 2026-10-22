@@ -52,6 +52,12 @@ export const caretX: () => number;
 export const caretY: () => number;
 /** The height of the caret's line in points (vp). */
 export const caretHeight: () => number;
+/** The drag handle's x in points (vp): the selection's focus end inside its line. */
+export const handleX: () => number;
+/** The drag handle's top y in points (vp). */
+export const handleY: () => number;
+/** The height of the drag handle's line in points (vp). */
+export const handleHeight: () => number;
 
 /** The next request from the Rust side (a JSON string), or null. Poll it once per frame. */
 export const hostTake: () => string | null;

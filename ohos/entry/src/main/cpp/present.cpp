@@ -134,32 +134,35 @@ bool Presenter::Present(const uint8_t *pixels, size_t len, uint32_t width, uint3
         return false;
     }
 
-    // Only the damaged part: the buffer keeps the previous frame everywhere else.
+    // The whole frame is copied into whatever buffer the window handed us: the queue cycles
+    // through several buffers, so the one we get does not hold the frame before this one — a
+    // partial copy would show a several-frames-old image (or never-written memory) around the
+    // changed part, which flickered while the selection was being dragged on the tablet.
     const uint32_t frame_w = std::min(width, (uint32_t)handle->width);
     const uint32_t frame_h = std::min(height, (uint32_t)handle->height);
-    const uint32_t copyX = std::min(damage_x, frame_w);
-    const uint32_t copyY = std::min(damage_y, frame_h);
-    const uint32_t copyW = std::min(damage_w, frame_w - copyX);
-    const uint32_t copyH = std::min(damage_h, frame_h - copyY);
-    if (copyW == 0 || copyH == 0) {
+    if (frame_w == 0 || frame_h == 0) {
         OH_NativeWindow_NativeWindowAbortBuffer(window_, buffer);
         if (fence >= 0) {
             close(fence);
         }
         return false;
     }
-    if (!warnedGeometry_ && (copyW != width || copyH != height)) {
+    if (!warnedGeometry_ && (frame_w != width || frame_h != height)) {
         // The surface is a different size than the frame we drew: copy what fits and say so once.
         WC_LOGW("frame %{public}ux%{public}u into %{public}dx%{public}d buffer", width, height, handle->width, handle->height);
         warnedGeometry_ = true;
     }
-    for (uint32_t y = 0; y < copyH; ++y) {
-        const uint32_t row = copyY + y;
-        std::memcpy(dst + (size_t)row * (size_t)handle->stride + (size_t)copyX * 4,
-                    pixels + (size_t)row * stride + (size_t)copyX * 4, (size_t)copyW * 4);
+    for (uint32_t y = 0; y < frame_h; ++y) {
+        std::memcpy(dst + (size_t)y * (size_t)handle->stride,
+                    pixels + (size_t)y * stride, (size_t)frame_w * 4);
     }
 
-    // Tell the compositor which part to pick up.
+    // The damage rectangle is only the compositor's hint: what it has to pick up. A collapsed
+    // one (a caller's zero, or clamping) falls back to the whole frame, never to "nothing".
+    const uint32_t copyX = std::min(damage_x, frame_w);
+    const uint32_t copyY = std::min(damage_y, frame_h);
+    const uint32_t copyW = damage_w == 0 || damage_h == 0 ? frame_w : std::min(damage_w, frame_w - copyX);
+    const uint32_t copyH = damage_w == 0 || damage_h == 0 ? frame_h : std::min(damage_h, frame_h - copyY);
     Region::Rect dirty{static_cast<int32_t>(copyX), static_cast<int32_t>(copyY), copyW, copyH};
     Region region{&dirty, 1};
     ret = OH_NativeWindow_NativeWindowFlushBuffer(window_, buffer, fence, region);

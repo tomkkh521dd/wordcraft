@@ -3047,6 +3047,33 @@ pub fn caret_screen(app: &mut WordApp) -> Option<(Pos2, f32)> {
     Some((p, c.height.max(c.width) * scale))
 }
 
+/// The drag handle's place on screen: at the caret when the selection is collapsed, and otherwise
+/// at the selection's focus end *inside its line* — the trailing edge of the last highlight
+/// rectangle for a forward selection, the leading edge of the first for a backward one. The
+/// caret of a focus at the end of a wrapped line is already on the next line, which drew the
+/// handle one line below the double-clicked word on the tablet.
+pub fn handle_screen(app: &mut WordApp) -> Option<(Pos2, f32)> {
+    if app.session.sel.is_collapsed() {
+        return caret_screen(app);
+    }
+    let forward = app.session.sel.focus >= app.session.sel.anchor;
+    let layout = app.session.layout();
+    let rects = layout.selection_rects(&app.session.doc, &app.session.sel.anchor, &app.session.sel.focus, app.session.page_hint);
+    let Some((page, rect)) = (if forward { rects.last() } else { rects.first() }).copied() else {
+        // Nothing highlightable is selected (a picture, a table's cells): the caret's place will do.
+        return caret_screen(app);
+    };
+    let x = if forward { rect.x + rect.w } else { rect.x };
+    let scale = app
+        .canvas
+        .page_rects
+        .get(page)
+        .and_then(|r| layout.pages.get(page).map(|p| page_screen_scale(*r, p, app.canvas.scale)))
+        .unwrap_or(app.canvas.scale);
+    let pos = page_to_screen(app, page, x, rect.y)?;
+    Some((pos, rect.h * scale))
+}
+
 pub fn pos_from_screen(app: &mut WordApp, p: Pos2) -> Option<Pos> {
     let layout = app.session.layout();
     let (page, x, y) = page_at(&app.canvas.page_rects, &layout, app.canvas.scale, p)?;
@@ -3650,6 +3677,157 @@ mod tests {
         );
         h.run_steps(4);
         assert!(h.state().canvas.caret_bg.is_none(), "no caret, no colour lookup");
+    }
+
+    /// The touch selection's drag handle: a double-click's word selection ends after the word's
+    /// trailing space, so at the end of a wrapped line the focus's caret is already on the next
+    /// line — but the handle belongs beside the selection, at the trailing edge of the last
+    /// highlight rectangle (the leading edge of the first for a backward selection), never a
+    /// line below the selected word. A collapsed selection's handle is the caret.
+    #[test]
+    fn touch_handle_stays_on_the_line_of_the_selection_not_of_the_wrapped_caret() {
+        let text = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima \
+                    mike november oscar papa quebec romeo sierra tango uniform victor whiskey";
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text(text)), Default::default());
+        let caret_top = |a: &mut WordApp, off: usize| {
+            let layout = a.session.layout();
+            let c = layout.caret_on(&Pos::body(0, off), 0).expect("the paragraph is laid out");
+            (c.top, c.height)
+        };
+        let (top0, h0) = caret_top(&mut a, 0);
+        let mut wrap = None;
+        for off in 1..=text.len() {
+            if caret_top(&mut a, off).0 > top0 + h0 * 0.5 {
+                wrap = Some(off);
+                break;
+            }
+        }
+        let wrap = wrap.expect("the paragraph wraps at the default page width");
+        // The word that ends line 1, as a double-click sees it (its trailing space included).
+        a.session.sel = wordcraft_engine::Selection::caret(Pos::body(0, wrap - 2));
+        a.run("select.word", json!({})).unwrap();
+        let sel = a.session.sel.clone();
+        assert!(sel.focus.off == wrap && sel.anchor.off < wrap - 2, "the last word of line 1 is selected: {sel:?}");
+
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        h.run_steps(6);
+        let line1_y = {
+            let app = h.state_mut();
+            let layout = app.session.layout();
+            let c = layout.caret_on(&Pos::body(0, 0), 0).expect("the paragraph is laid out");
+            page_to_screen(app, c.page, c.x, c.top).expect("on screen").y
+        };
+        // The premise of the tablet bug: the focus's caret is on line 2 while the word is on line 1.
+        let (caret, _) = caret_screen(h.state_mut()).expect("the caret is on screen");
+        assert!(caret.y > line1_y, "the wrapped focus's caret {caret:?} is on line 2 (line 1 starts at {line1_y:?})");
+        // The handle stays on the selected word's line, at the selection's trailing edge.
+        let (handle, handle_h) = handle_screen(h.state_mut()).expect("the handle is on screen");
+        assert!(handle.y < caret.y - handle_h * 0.25, "the handle {handle:?} is a line above the wrapped caret {caret:?}");
+        assert!(handle.y > line1_y - handle_h && handle.y < line1_y + handle_h * 2.0, "the handle {handle:?} is on line 1 (starts at {line1_y:?})");
+        let forward_x = handle.x;
+
+        // Backward selection of the same word: the handle is at the leading edge, still line 1.
+        h.state_mut().session.sel = wordcraft_engine::Selection { anchor: sel.focus.clone(), focus: sel.anchor.clone() };
+        h.run_steps(2);
+        let (handle_b, handle_bh) = handle_screen(h.state_mut()).expect("the handle is on screen");
+        assert!(handle_b.y > line1_y - handle_bh && handle_b.y < line1_y + handle_bh * 2.0, "the backward handle {handle_b:?} is on line 1");
+        assert!(handle_b.x < forward_x, "the backward handle {handle_b:?} is at the leading edge of {forward_x:?}");
+
+        // A word mid-line: the handle and the caret share the line.
+        let first_word = text.find(' ').unwrap();
+        h.state_mut().session.sel = wordcraft_engine::Selection::caret(Pos::body(0, 1));
+        h.state_mut().run("select.word", json!({})).unwrap();
+        h.run_steps(2);
+        let (caret_m, _) = caret_screen(h.state_mut()).expect("the caret is on screen");
+        let (handle_m, handle_mh) = handle_screen(h.state_mut()).expect("the handle is on screen");
+        assert!(
+            handle_m.y < caret_m.y + handle_mh && handle_m.y > caret_m.y - handle_mh,
+            "mid-line handle {handle_m:?} shares the caret's line {caret_m:?}"
+        );
+        assert!(h.state().session.sel.focus.off > first_word, "the selection ran past the first word");
+
+        // A collapsed selection's handle is the caret.
+        h.state_mut().session.sel = wordcraft_engine::Selection::caret(Pos::body(0, 1));
+        h.run_steps(2);
+        assert_eq!(handle_screen(h.state_mut()), caret_screen(h.state_mut()));
+    }
+
+    /// The tablet's handle drag presses with Shift ("extend to here"): from a collapsed caret the
+    /// press must leave a real selection — the anchor stays where the caret was, the focus moves
+    /// to the pressed spot — never a collapsed caret at the pressed spot. On the device a tap on
+    /// the handle (its window coordinates arrived a line low) ended with the caret collapsed at
+    /// the tap, and the next keystroke inserted there instead of replacing the selection.
+    #[test]
+    fn shift_press_from_a_collapsed_caret_extends_not_collapses() {
+        let text = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima \
+                    mike november oscar papa quebec romeo sierra tango uniform victor whiskey";
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text(text)), Default::default());
+        let line1_end = {
+            let layout = a.session.layout();
+            let c0 = layout.caret_on(&Pos::body(0, 0), 0).expect("the paragraph is laid out");
+            (1..=text.len())
+                .find(|&off| layout.caret_on(&Pos::body(0, off), 0).expect("the paragraph is laid out").top > c0.top + c0.height * 0.5)
+                .expect("the paragraph wraps at the default page width")
+        };
+        let caret = Pos::body(0, line1_end - 2);
+        a.session.sel = wordcraft_engine::Selection::caret(caret.clone());
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        h.run_steps(6);
+        // The pressed spot: on a line below the caret, like the device's mis-aimed handle tap.
+        // Mid-line, not its top: a caret's top can sit inside the previous line's line box.
+        let press_at = {
+            let app = h.state_mut();
+            let layout = app.session.layout();
+            let c = layout.caret_on(&Pos::body(0, text.len() * 2 / 3), 0).expect("the paragraph is laid out");
+            page_to_screen(app, c.page, c.x, c.top + c.height * 0.5).expect("the pressed line is on screen")
+        };
+        let caret_at = {
+            let app = h.state_mut();
+            let layout = app.session.layout();
+            let c = layout.caret_on(&caret, 0).expect("the paragraph is laid out");
+            page_to_screen(app, c.page, c.x, c.top).expect("the caret's line is on screen")
+        };
+        assert!(press_at.y > caret_at.y + 20.0, "the press {press_at:?} is a line below the caret {caret_at:?}");
+        // A plain tap first (the tap that put the caret there and brought the keyboard up).
+        h.event(egui::Event::PointerMoved(caret_at));
+        h.event(egui::Event::PointerButton { pos: caret_at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(3);
+        h.event(egui::Event::PointerButton { pos: caret_at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(3);
+        let before = h.state().session.sel.clone();
+        assert!(before.is_collapsed(), "the tap left a collapsed caret, got {before:?}");
+        // The handle's press: the modifier change is its own event (egui's `i.modifiers` follows
+        // only `Event::ModifiersChanged`), then Shift+down, then Shift+up.
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+        h.event(egui::Event::PointerMoved(press_at));
+        h.event(egui::Event::PointerButton { pos: press_at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::SHIFT });
+        h.run_steps(3);
+        let after_press = h.state().session.sel.clone();
+        h.event(egui::Event::PointerButton {
+            pos: press_at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::SHIFT,
+        });
+        h.run_steps(4);
+        let after = h.state().session.sel.clone();
+        assert!(!after_press.is_collapsed(), "the Shift press extends from the collapsed caret, got {after_press:?}");
+        assert!(!after.is_collapsed(), "the Shift release keeps the selection, got {after:?}");
+        assert_eq!(after.anchor, before.focus, "the anchor stays at the caret the handle was pressed at");
     }
 
     /// #167: dragging a ruler's margin edge sets that margin, snapped, never negative, and

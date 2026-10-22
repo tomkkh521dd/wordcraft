@@ -416,6 +416,24 @@ napi_value CaretHeight(napi_env env, napi_callback_info info) {
     return Number(env, wc_caret_height());
 }
 
+/* handleX() -> the drag handle's x in points */
+napi_value HandleX(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_handle_x());
+}
+
+/* handleY() -> the drag handle's top y in points */
+napi_value HandleY(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_handle_y());
+}
+
+/* handleHeight() -> how tall the drag handle's line is, in points */
+napi_value HandleHeight(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_handle_height());
+}
+
 /* imePreview(text): the composing text, drawn at the caret until the commit replaces it */
 napi_value ImePreview(napi_env env, napi_callback_info info) {
     napi_value argv[1];
@@ -576,6 +594,9 @@ napi_value Init(napi_env env, napi_value exports) {
         {"caretX", nullptr, CaretX, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretY", nullptr, CaretY, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretHeight", nullptr, CaretHeight, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"handleX", nullptr, HandleX, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"handleY", nullptr, HandleY, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"handleHeight", nullptr, HandleHeight, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"hostTake", nullptr, HostTake, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"hostAnswer", nullptr, HostAnswer, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"destroy", nullptr, Destroy, nullptr, nullptr, nullptr, napi_default, nullptr},

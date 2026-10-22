@@ -83,6 +83,12 @@ int32_t wc_selection_range(void);
 float wc_caret_x(void);
 float wc_caret_y(void);
 float wc_caret_height(void);
+/* The drag handle's x and top y in points, and the height of its line (all 0 when there is none):
+ * the selection's focus end inside its line — a focus at the end of a wrapped line has its caret
+ * on the next line, but its handle stays on the line the selection ends. */
+float wc_handle_x(void);
+float wc_handle_y(void);
+float wc_handle_height(void);
 void wc_focus(int32_t focused);
 
 /* --- frames -------------------------------------------------------------- */

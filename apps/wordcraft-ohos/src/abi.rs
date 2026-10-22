@@ -283,6 +283,25 @@ pub extern "C" fn wc_caret_height() -> f32 {
     with(0.0, |app| app.caret().map_or(0.0, |(_, _, height)| height))
 }
 
+/// The drag handle's x in points (the selection's focus end inside its line), or 0 when there is
+/// none.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_handle_x() -> f32 {
+    with(0.0, |app| app.handle().map_or(0.0, |(x, _, _)| x))
+}
+
+/// The drag handle's y in points (its top), or 0 when there is none.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_handle_y() -> f32 {
+    with(0.0, |app| app.handle().map_or(0.0, |(_, y, _)| y))
+}
+
+/// The height of the drag handle's line in points, or 0 when there is none.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_handle_height() -> f32 {
+    with(0.0, |app| app.handle().map_or(0.0, |(_, _, height)| height))
+}
+
 /// The input method started (`1`) or finished (`0`) composing.
 #[unsafe(no_mangle)]
 pub extern "C" fn wc_ime(composing: i32) {

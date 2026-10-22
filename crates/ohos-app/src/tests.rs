@@ -106,13 +106,16 @@ fn pointer_and_scroll_become_egui_events() {
     app.pointer(PointerKind::Up, 110.0, 210.0, Button::Primary, 0);
     app.scroll(Scroll { dx: 0.0, dy: -120.0 });
     let events = app.pending_events().to_vec();
-    assert!(matches!(events[0], Event::PointerMoved(p) if p.x == 100.0 && p.y == 200.0), "{events:?}");
+    // The modifier change is its own event, before the ones it modifies.
+    assert!(matches!(events[0], Event::ModifiersChanged(m) if m.ctrl), "{events:?}");
+    assert!(matches!(events[1], Event::PointerMoved(p) if p.x == 100.0 && p.y == 200.0), "{events:?}");
     assert!(
-        matches!(events[1], Event::PointerButton { pressed: true, button: PointerButton::Primary, modifiers, .. } if modifiers.ctrl),
+        matches!(events[2], Event::PointerButton { pressed: true, button: PointerButton::Primary, modifiers, .. } if modifiers.ctrl),
         "{events:?}"
     );
-    assert!(matches!(events[3], Event::PointerButton { pressed: false, .. }), "{events:?}");
-    assert!(matches!(events[4], Event::MouseWheel { delta, .. } if delta.y == -120.0), "{events:?}");
+    assert!(matches!(events[3], Event::ModifiersChanged(m) if !m.ctrl), "{events:?}");
+    assert!(matches!(events[5], Event::PointerButton { pressed: false, .. }), "{events:?}");
+    assert!(matches!(events[6], Event::MouseWheel { delta, .. } if delta.y == -120.0), "{events:?}");
 }
 
 #[test]
@@ -122,6 +125,35 @@ fn a_touch_without_a_button_is_the_primary_button() {
     assert!(matches!(app.pending_events()[1], Event::PointerButton { button: PointerButton::Primary, .. }));
     app.pointer(PointerKind::Leave, 0.0, 0.0, Button::None, 0);
     assert!(matches!(app.pending_events().last(), Some(Event::PointerGone)), "leaving the surface clears hover");
+}
+
+/// The touch handle's drag presses with Shift ("extend to here"): egui's `i.modifiers` — what the
+/// canvas reads — only follows `Event::ModifiersChanged`, never the modifiers a pointer event
+/// carries, so the shell reports the change itself, the way a desktop OS does. Without it the
+/// handle's press collapsed the caret at the pressed spot instead of extending the selection
+/// (measured on the tablet: the next keystroke inserted instead of replacing).
+#[test]
+fn a_shift_press_extends_the_selection_from_the_caret() {
+    let mut app = App::new();
+    app.resize(1200, 800, 1.5);
+    for _ in 0..4 {
+        app.render();
+    }
+    let tap = |app: &mut App, x: f32, y: f32, mods: i32| {
+        app.pointer(PointerKind::Down, x, y, Button::None, mods);
+        app.render();
+        app.pointer(PointerKind::Up, x, y, Button::None, mods);
+        app.render();
+    };
+    // A tap on the text places a collapsed caret.
+    tap(&mut app, 400.0, 300.0, 0);
+    assert!(!app.selection_is_range(), "the tap left a collapsed caret");
+    assert!(app.selection().focus.off > 0, "the tap landed in the sample text");
+    let anchor = app.selection().focus.off;
+    // The handle's press carries Shift: the same tap elsewhere extends the selection.
+    tap(&mut app, 500.0, 400.0, modifiers::SHIFT);
+    assert!(app.selection_is_range(), "the Shift press extends the selection from the caret");
+    assert_eq!(app.selection().anchor.off, anchor, "the anchor stays at the first tap");
 }
 
 #[test]
@@ -243,9 +275,13 @@ fn keys_map_to_egui_and_text_arrives_separately() {
     app.key(KeyEvent { code: 2054, pressed: true, repeated: false, modifiers: 0, text: None });
     app.text('字');
     let events = app.pending_events().to_vec();
-    assert!(matches!(events[0], Event::Key { key: Key::S, pressed: true, modifiers, .. } if modifiers.ctrl), "{events:?}");
-    assert!(matches!(events[1], Event::Key { key: Key::Enter, .. }), "{events:?}");
-    assert!(matches!(&events[2], Event::Text(text) if text == "字"), "{events:?}");
+    // The modifier change is its own event, before the chord it modifies (egui's `i.modifiers`
+    // follows only `Event::ModifiersChanged`), and it changes back before the bare Enter.
+    assert!(matches!(events[0], Event::ModifiersChanged(m) if m.ctrl), "{events:?}");
+    assert!(matches!(events[1], Event::Key { key: Key::S, pressed: true, modifiers, .. } if modifiers.ctrl), "{events:?}");
+    assert!(matches!(events[2], Event::ModifiersChanged(m) if !m.ctrl), "{events:?}");
+    assert!(matches!(events[3], Event::Key { key: Key::Enter, .. }), "{events:?}");
+    assert!(matches!(&events[4], Event::Text(text) if text == "字"), "{events:?}");
     assert_eq!(app.typed(), "字");
     assert_eq!(egui_key(2012), Some(Key::ArrowUp));
     assert_eq!(egui_key(2090), Some(Key::F1));

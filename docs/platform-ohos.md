@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (three unsolved device reports written up for handover: selection flicker, the double-click caret one line below, and the IME's language shortcut; previously minor (typed characters come from the key code — the platform's `keyText` typed `K` for every key — and a changed selection repaints in full; previously minor (second device report: fresh frame buffer on resize (the black/white flash), one pointer event per mouse click (random word selection), a longer clipboard wait; previously minor (device reports: resize flicker fixed, the composing field turned off (it cancelled the IME's composition), a copied picture read through its URI; previously minor (the keyboard now types into a field on the caret, so 拼音 composition is drawn in the page; previously minor (File › Share opens the system share sheet; previously minor ("Open with" from the file manager, and a verified copy-out that repairs a save killed mid-write on the next start; previously minor (files survive a restart: persisted file grants, the sandbox ↔ URI table and reopening the last document; previously minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (all three handed-over device reports closed: P1 selection flicker (a texture re-uploaded in place was invisible to the damage diff), P2 the handle a line low and its Shift press collapsing the selection (egui's `i.modifiers` follows only `Event::ModifiersChanged`, which the shell now emits) plus `dragHandle`'s window-vs-canvas offset, P3 the IME language shortcut documented as the keyboard's own key; previously minor (three unsolved device reports written up for handover: selection flicker, the double-click caret one line below, and the IME's language shortcut; previously minor (typed characters come from the key code — the platform's `keyText` typed `K` for every key — and a changed selection repaints in full; previously minor (second device report: fresh frame buffer on resize (the black/white flash), one pointer event per mouse click (random word selection), a longer clipboard wait; previously minor (device reports: resize flicker fixed, the composing field turned off (it cancelled the IME's composition), a copied picture read through its URI; previously minor (the keyboard now types into a field on the caret, so 拼音 composition is drawn in the page; previously minor (File › Share opens the system share sheet; previously minor ("Open with" from the file manager, and a verified copy-out that repairs a save killed mid-write on the next start; previously minor (files survive a restart: persisted file grants, the sandbox ↔ URI table and reopening the last document; previously minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -391,83 +391,62 @@ Two things only a device shows, both handled:
 - Phone-sized layout: the ribbon collapses, but a phone-first layout is later work.
 - No GPU renderer; very large windows on high-DPI screens are CPU-bound.
 
-## Open problems for the next agent
+## The three device reports, solved
 
-Three device reports are **not solved** and are handed over as they stand. Each entry says what
-is seen, what has already been tried, where the code is, and the one experiment worth running
-first. The tablet used for all of it is a HUAWEI BKY-W00 (HarmonyOS 6.1.0.135, API 24,
-1840x2650 at 2.25x, bundle `karl.hmsoft.wordcraft`); `plan/ohos-dev/awake.sh` keeps its screen on
-(`power-shell timeout -o 86400000` plus a device-side loop) and the usual loop is
-`packaging/ohos/build-hap.sh`, `hdc install -r dist/release/wordcraft-0.9.0-debug.hap`,
+The three reports handed over on 2026-10-22 are solved; each fix has a regression test and was
+verified on the tablet (HUAWEI BKY-W00, 1840x2650 at 2.25x, bundle `karl.hmsoft.wordcraft`).
+The usual loop: `packaging/ohos/build-hap.sh`, `hdc install -r dist/release/wordcraft-0.9.0-debug.hap`,
 `hdc shell aa start -a EntryAbility -b karl.hmsoft.wordcraft`, `uitest uiInput …`,
 `hdc shell snapshot_display -f /data/local/tmp/x.jpeg` + `hdc file recv` (use
 `MSYS_NO_PATHCONV=1`), and `hilog -T WordCraft -x` for the app's log.
 
-### P1. The page flickers while the selection is being changed
+### P1. The page flickered while the selection was being changed — fixed
 
-**Symptom.** After a double click selects a word, moving the mouse makes the highlight
-flicker and look incomplete for a frame or two, then it settles. Earlier (before `05a662ae`) a
-plain tap could flash the whole window black with a few white patches, at random.
+The page's texture is re-uploaded **in place**, with the same `TextureId`, so a re-rendered page
+was invisible to the mesh-signature damage diff: the damage rect missed meshes that changed only
+by what their texture now contains, and the half-updated buffer flickered. `render`
+(`crates/ohos-app/src/app.rs`) now keeps the frame's uploaded texture ids and `take_damage` marks
+the meshes that sample them as damaged by hand; a texture upload also forces rasterisation for
+the frame it arrived in. Device-verified: a drag-select paints a solid highlight with no flash.
 
-**Fixed so far.** The frame buffer was reallocated by resizing the *old* allocation, so a resize
-(the soft keyboard opening) left bytes that were never a frame and the damage pass painted only
-part of it: `resize_buffer` now allocates a fresh buffer and `invalidate_frame()` (`app.rs`) makes
-the next paint full. A changed selection also invalidates the frame now (`render`, `painted_selection`).
-The user still sees the flicker, so the cause is not (only) those two.
+### P2. The selection handle was one line below the selection (and collapsed it) — fixed
 
-**Where.** `crates/ohos-app/src/app.rs`: `render` -> `take_damage` (mesh-signature diff, index
-aligned, falls back to a full frame when the union exceeds 60% of the window) -> `painter.paint_damaged`
--> `present.cpp` (`RequestBuffer` → copy → `FlushBuffer`).
+Two bugs, both measured on the tablet:
 
-**Experiment to run first.** Make `take_damage` return `None` (paint everything, every frame) and
-rebuild: if the flicker disappears, the damage path is the cause (most likely the union missing a
-mesh that changed — the page quad's texture is updated in place with the same `TextureId`, so a
-re-rendered page is invisible to the signature diff), and the fix is to treat "a texture was
-uploaded this frame" as damage over that page's rectangle. Recorded in `render`: the first frame
-after a tap painted 100% of the window (17M px, ~32 ms), so a full repaint per change is affordable
-on this device; the reason the stats showed 100% was a changed mesh whose old-and-new union was
-798x970 of 818x1178 points, i.e. the page.
+- **The handle's position.** After a double click the selection's focus is the word's end; when
+  the word ends the line, that caret position is the first column of the *next* line, so the
+  handle drawn at `caret_screen` sat a line low. `canvas::handle_screen`
+  (`crates/ui-egui/src/canvas.rs`) now draws a range's handle at the trailing (forward selection)
+  or leading (backward selection) edge of the selection's end, inside its line; a collapsed
+  selection still uses `caret_screen`. Pinned by kittest tests in `canvas.rs`.
+- **The handle's Shift press collapsed the selection instead of extending it** (the reason the
+  typed-over word disappeared and a single character landed at the pressed spot). Root cause:
+  egui's `i.modifiers` — what the canvas reads to tell a Shift press from a plain one — follows
+  **only** `Event::ModifiersChanged`, never the modifiers a pointer event carries (`egui` 0.36,
+  `input_state/mod.rs`). The shell embedded Shift in the pointer event but never sent
+  `ModifiersChanged`, so the canvas saw no Shift and collapsed the caret at the press. Desktop
+  works because egui-winit emits the change from the OS. `App::pointer`/`App::key`
+  (`crates/ohos-app/src/app.rs`) now emit `Event::ModifiersChanged` whenever the reported bits
+  change (`update_modifiers`), which also heals a stale state on the next event. Pinned by
+  `a_shift_press_extends_the_selection_from_the_caret` in `crates/ohos-app/src/tests.rs` (end to
+  end) and `shift_press_from_a_collapsed_caret_extends_not_collapses` in `canvas.rs` (the canvas
+  contract). Device-verified: the handle's Shift press now paints a highlight from the caret to
+  the press, and the next keystroke *replaces* the selection instead of inserting at a collapsed
+  caret.
 
-### P2. A double click puts the caret (and the handle) one line below the pointer
+A third bug was found on the way: **`dragHandle` passed window coordinates to a page that speaks
+component ones**, so every handle press landed a window-top-inset low (87 px on the tablet).
+The canvas's `onTouch` now captures the window↔canvas offset from every touch and `dragHandle`
+subtracts it (`ohos/entry/src/main/ets/pages/Index.ets`). Device-verified: the logged press
+position equals the touched position exactly.
 
-**Symptom.** Double clicking in the body selects the word under the pointer, and the *blue
-selection handle* appears one line lower, at the start of the next line. It reproduces every time.
+### P3. The keyboard's shortcut for switching to Chinese — no app-side fix
 
-**Hypothesis (not yet confirmed).** After a double click the selection's focus is the *end* of the
-word; when the word ends the line, that position is the first column of the next line, and the
-handle is drawn at the focus (`wc_caret_*`, from `canvas::caret_screen`). If so the selection itself
-is right and only the handle's placement looks wrong.
-
-**First step.** Verify, then decide: log `session.sel.anchor`/`focus` and the caret rect at the
-moment of the double click (they are one line apart?), or simply change the handle rule — draw it
-at the *end of the last selection rectangle* (inside the line) instead of at the caret, and only
-show a caret handle when the selection is collapsed. Touching it must keep the "Shift press
-extends from the anchor" behaviour in `dragHandle`.
-
-**Where.** `ohos/entry/src/main/ets/pages/Index.ets` (`followCaretHandle`, `dragHandle`,
-`HANDLE_TOUCH`), `wc_caret_present/x/y/height` and `wc_selection_range` in
-`apps/wordcraft-ohos/src/abi.rs`, `canvas::caret_screen` in `crates/ui-egui/src/canvas.rs`.
-
-### P3. The keyboard's shortcut for switching to Chinese does not work in the app
-
-**Symptom.** With the soft keyboard up, the shortcut that switches the input method between
-English and Chinese does nothing while the document has focus; the keyboard's own 中/英 key works.
-Typing in Chinese with the 中 key selected *does* work (`inputMethod.attach`, one commit per word).
-
-**State.** The app is attached through `inputMethod.getController().attach(true, {inputAttribute:
-{ textInputType: TEXT, enterKeyType: DONE }, cursorInfo })` and listens for `insertText`,
-`deleteLeft`, `sendFunctionKey`, `moveCursor`. It does not set `consumeKeyEvents` (API 26,
-`InputAttribute`: "whether the editor handles letters, characters and function keys itself"). The
-composing-field variant (`USE_IME_FIELD`) is off.
-
-**Experiments.** Log every `wc_key` while attached (do Ctrl/Shift reach the app at all?); try
-`consumeKeyEvents: false`/`true` in `attach`; check whether the shortcut is a *system* shortcut that
-needs the window to pass keys on (our `onKeyEvent` returns nothing, so it does not consume them);
-and if nothing helps, document that the keyboard's own 中/英 key is the supported route.
-
-**Where.** `ohos/entry/src/main/ets/pages/Index.ets` (`attachInputMethod`, `listenInputMethod`,
-`onKeyEvent`), `crates/ohos-app/src/app.rs::key`, `crates/ohos-app/src/input.rs`
-(`character_for`, `egui_key`).
+Investigated with device experiments (`plan/ohos-dev/p3-*.jpeg`, local): the switch is the
+keyboard's own state, not an event the document sees, and neither `wc_key` nor the IME channel
+carries it while the document has focus. Typing in both languages commits correctly through
+`inputMethod.attach`, so the supported route is the keyboard's own 中/英 key; documented here
+rather than changed in code.
 
 ### Also open, but understood
 
@@ -482,6 +461,7 @@ and if nothing helps, document that the keyboard's own 中/英 key is the suppor
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-23 | minor | The three handed-over device reports are closed: P1 selection flicker (a texture re-uploaded in place with the same `TextureId` was invisible to the mesh-signature damage diff — uploads now damage their meshes by hand), P2 the handle a line low (`handle_screen` draws it at the selection end's edge inside its line) and its Shift press collapsing the selection (egui's `i.modifiers` follows only `Event::ModifiersChanged`, so the shell emits the change itself) plus `dragHandle`'s 87 px window-vs-canvas offset (captured from canvas touches), all device-verified on the tablet; P3 (the IME's 中/英 shortcut) is the keyboard's own state, so the keyboard's key is the supported route |
 | 2026-10-22 | minor | Handover: the three unsolved device reports (P1 selection flicker, P2 double-click caret one line below, P3 IME language shortcut) are written up in *Open problems for the next agent*, with the code they live in and the first experiment for each |
 | 2026-10-22 | minor | OHOS.10d, third device report: every character key typed `K` because the platform's `keyText` is not the key's character — the character is now derived from the key code and modifiers (Ctrl, Alt and Meta make shortcuts); a changed selection invalidates the frame so the highlight is never painted half way |
 | 2026-10-22 | minor | OHOS.10c, second device report: the frame buffer is now reallocated fresh and the previous frame invalidated on any resize (the black-screen-with-white-patches flash), a mouse click is no longer counted twice (random word selection), and the paste waits up to 1.5 s for the clipboard (a copied picture has to be packed first). Copied-file records turned out to be visible only for a few seconds, which no app-side fix can extend |

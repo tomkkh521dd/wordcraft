@@ -262,6 +262,13 @@ struct Index {
   @State private handleX: number = 0;
   @State private handleY: number = 0;
   @State private handleHeight: number = 0;
+  /**
+   * The canvas's offset in the window (vp), captured from a canvas touch. The handle's own touch
+   * events report window coordinates, which the page must convert to the canvas's own or every
+   * handle press lands a window's-worth below where the finger is (measured: 87 px on the tablet).
+   */
+  private canvasOffsetX: number = 0;
+  private canvasOffsetY: number = 0;
   /** The document the app had open, so a relaunch reopens it ("resume where you left"). */
   private lastDocument: string = '';
   /** The URI another app asked us to open (the file manager's "open with"). */
@@ -1153,7 +1160,7 @@ struct Index {
     return this.themeDark ? '#ffe8e8e8' : '#ff202020';
   }
 
-  /** Keep the handle on the caret's end, and hide it when there is nothing to edit. */
+  /** Keep the handle on the selection's end, and hide it when there is nothing to edit. */
   private followCaretHandle(): void {
     const present: boolean = native.caretPresent() === 1;
     if (!present) {
@@ -1162,9 +1169,9 @@ struct Index {
       }
       return;
     }
-    const x: number = native.caretX();
-    const y: number = native.caretY();
-    const height: number = native.caretHeight();
+    const x: number = native.handleX();
+    const y: number = native.handleY();
+    const height: number = native.handleHeight();
     const range: boolean = native.selectionRange() === 1;
     if (!this.handleVisible) {
       this.handleVisible = true;
@@ -1194,9 +1201,11 @@ struct Index {
     if (touch === undefined) {
       return;
     }
-    // The handle's own touch coordinates are local to its 44 vp box; the page needs window ones.
-    const x: number = touch.windowX;
-    const y: number = touch.windowY;
+    // The handle's own touch coordinates are window ones; the page needs the canvas's, so the
+    // offset captured from the last canvas touch comes off (a plain window position lands 87 px
+    // low on the tablet — the window's top inset).
+    const x: number = touch.windowX - this.canvasOffsetX;
+    const y: number = touch.windowY - this.canvasOffsetY;
     if (event.type === TouchType.Down) {
       this.pressDragged = true; // a handle drag is never a context-menu press
       this.stopPressTimer();
@@ -1407,6 +1416,10 @@ struct Index {
           if (touch === undefined) {
             return;
           }
+          // Every canvas touch tells us where the canvas sits in the window, for the handle's
+          // window-coordinate touches (see `dragHandle`).
+          this.canvasOffsetX = touch.windowX - touch.x;
+          this.canvasOffsetY = touch.windowY - touch.y;
           let kind: number = POINTER_MOVE;
           if (event.type === TouchType.Down) {
             kind = POINTER_DOWN;

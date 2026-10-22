@@ -72,8 +72,10 @@ pub struct App {
     composing: bool,
     scrolled: (f32, f32),
     timings: FrameTimings,
-    /// What the previous frame's meshes looked like, to find the part that changed.
-    previous: Vec<(u64, egui::Rect)>,
+    /// What the previous frame's meshes looked like, to find the part that changed: a signature,
+    /// the rectangle it covers, and the texture it samples (a re-uploaded texture changes what a
+    /// mesh draws without changing the mesh).
+    previous: Vec<(u64, egui::Rect, egui::TextureId)>,
     /// The part of the frame that changed since the previous one, in points (`None`: all of it).
     damage: Option<egui::Rect>,
     /// Where the text caret is, in points, refreshed after every UI pass: the platform's input
@@ -81,6 +83,12 @@ pub struct App {
     caret: Option<egui::Pos2>,
     /// The height of the caret's line, in points.
     caret_height: f32,
+    /// Where the shell's drag handle belongs, in points: the selection's focus end inside its
+    /// line (the caret of a focus at the end of a wrapped line is on the next line, and the
+    /// handle would follow it there), or the caret when the selection is collapsed.
+    handle: Option<egui::Pos2>,
+    /// The height of the handle's line, in points.
+    handle_height: f32,
     /// A fling still in progress (points per second, positive = scrolling down and right), and the
     /// time it was last advanced.
     fling: (f32, f32),
@@ -131,6 +139,8 @@ impl App {
             damage: None,
             caret: None,
             caret_height: 0.0,
+            handle: None,
+            handle_height: 0.0,
             fling: (0.0, 0.0),
             painted_selection: Selection::caret(Pos::body(0, 0)),
             startup: None,
@@ -180,10 +190,23 @@ impl App {
         !self.ui.session.sel.is_collapsed()
     }
 
+    /// The selection, for the crate's tests.
+    #[cfg(test)]
+    pub(crate) fn selection(&self) -> &Selection {
+        &self.ui.session.sel
+    }
+
     /// Where the text caret is in points (x, y) and how tall its line is, for the platform's input
     /// method; `None` when no text is being edited.
     pub fn caret(&self) -> Option<(f32, f32, f32)> {
         self.caret.map(|pos| (pos.x, pos.y, self.caret_height))
+    }
+
+    /// Where the shell's drag handle belongs in points (x, y) and how tall its line is; `None`
+    /// when no text is being edited. Unlike the caret this sits at the selection's focus end
+    /// *inside its line*, so a word that ends a wrapped line keeps its handle on that line.
+    pub fn handle(&self) -> Option<(f32, f32, f32)> {
+        self.handle.map(|pos| (pos.x, pos.y, self.handle_height))
     }
 
     pub fn events(&self) -> u64 {
@@ -301,10 +324,21 @@ impl App {
         self.count(format!("focus {}", if focused { "in" } else { "out" }));
     }
 
+    /// egui's `i.modifiers` — what the canvas reads to tell a Shift press from a plain one — only
+    /// follows `Event::ModifiersChanged`, never the modifiers an input event carries (a desktop
+    /// OS sends the change its own event too). Report every change the shell sees, or the touch
+    /// handle's Shift press collapses the caret instead of extending the selection.
+    fn update_modifiers(&mut self, modifiers: egui::Modifiers) {
+        if modifiers != self.modifiers_state {
+            self.raw.events.push(Event::ModifiersChanged(modifiers));
+            self.modifiers_state = modifiers;
+        }
+    }
+
     /// A pointer (touch, pen or mouse) event at `x`, `y` in vp.
     pub fn pointer(&mut self, kind: PointerKind, x: f32, y: f32, button: Button, mods: i32) {
         let pos = Pos2::new(sane(x), sane(y));
-        self.modifiers_state = modifiers::egui(mods);
+        self.update_modifiers(modifiers::egui(mods));
         if kind == PointerKind::Down {
             // Touching the page stops a fling, the way it stops a scroll on paper.
             self.fling = (0.0, 0.0);
@@ -420,7 +454,7 @@ impl App {
 
     /// A hardware key. The character it produced arrives as a [`Self::text`] call from the shell.
     pub fn key(&mut self, event: KeyEvent) {
-        self.modifiers_state = modifiers::egui(event.modifiers);
+        self.update_modifiers(modifiers::egui(event.modifiers));
         if let Some(key) = input::egui_key(event.code) {
             self.raw.events.push(Event::Key {
                 key,
@@ -556,10 +590,17 @@ impl App {
         let caret = wordcraft_ui_egui::canvas::caret_screen(&mut self.ui);
         self.caret = caret.map(|(pos, _)| pos);
         self.caret_height = caret.map_or(0.0, |(_, height)| height);
+        // Where the shell's drag handle belongs: the selection's end inside its line.
+        let handle = wordcraft_ui_egui::canvas::handle_screen(&mut self.ui);
+        self.handle = handle.map(|(pos, _)| pos);
+        self.handle_height = handle.map_or(0.0, |(_, height)| height);
 
         // Textures must land before the meshes that sample them, and the delta must be emptied
-        // once applied (egui's Drop asserts on leftovers).
+        // once applied (egui's Drop asserts on leftovers). Which textures were re-uploaded is
+        // kept: a page the UI re-rendered in place (same `TextureId`) is invisible to the mesh
+        // diff below, so those meshes are damaged by hand.
         let mut textures = output.textures_delta;
+        let uploaded: Vec<egui::TextureId> = textures.set.keys().copied().collect();
         self.painter.apply_textures(&textures);
         textures.clear();
 
@@ -568,7 +609,10 @@ impl App {
         // expensive one.)
         // A delay of "never" or "later" means egui is happy with what is on screen; only an
         // immediate repaint (an animation, a caret blink landing) needs a new frame now.
-        let wants_paint = had_input || output.viewport_output.get(&egui::ViewportId::ROOT).is_none_or(|v| v.repaint_delay.is_zero());
+        // A texture uploaded this frame has to be rasterised now: the meshes sampling it may be
+        // identical to the previous frame's, so this is the only frame that would ever show it.
+        let wants_paint =
+            had_input || !uploaded.is_empty() || output.viewport_output.get(&egui::ViewportId::ROOT).is_none_or(|v| v.repaint_delay.is_zero());
         if self.frames > 0 && !wants_paint {
             self.timings = FrameTimings { ui_ms, tessellate_ms: 0.0, paint_ms: 0.0 };
             return FrameNeeded::No;
@@ -579,7 +623,7 @@ impl App {
         let tessellating = Instant::now();
         let primitives = ctx.tessellate(output.shapes, pixels_per_point);
         let tessellate_ms = tessellating.elapsed().as_secs_f32() * 1000.0;
-        let damage = self.take_damage(&primitives);
+        let damage = self.take_damage(&primitives, &uploaded);
         if damage == Some(egui::Rect::NOTHING) {
             // Every mesh is identical to the previous frame's: the screen is already right.
             self.timings = FrameTimings { ui_ms, tessellate_ms, paint_ms: 0.0 };
@@ -679,9 +723,13 @@ impl App {
     /// egui hands over the whole scene each pass, so the diff is per mesh: same count, and a
     /// signature (geometry, uv, colour, texture) that mostly matches. A moved or edited mesh
     /// damages both its old and its new rectangle, so nothing stale is left behind.
-    fn take_damage(&mut self, primitives: &[egui::ClippedPrimitive]) -> Option<egui::Rect> {
+    ///
+    /// A mesh whose texture was re-uploaded this frame counts as changed even when the mesh
+    /// itself is identical: the UI re-renders a page in place (a `TextureHandle::set` with the
+    /// same `TextureId`), and without this the new page pixels would never be rasterised.
+    fn take_damage(&mut self, primitives: &[egui::ClippedPrimitive], uploaded: &[egui::TextureId]) -> Option<egui::Rect> {
         use std::hash::{Hash, Hasher};
-        let mut current: Vec<(u64, egui::Rect)> = Vec::with_capacity(primitives.len());
+        let mut current: Vec<(u64, egui::Rect, egui::TextureId)> = Vec::with_capacity(primitives.len());
         for clipped in primitives {
             let egui::epaint::Primitive::Mesh(mesh) = &clipped.primitive else { continue };
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -698,15 +746,16 @@ impl App {
             for vertex in &mesh.vertices {
                 rect = rect.union(egui::Rect::from_min_max(vertex.pos, vertex.pos));
             }
-            current.push((hasher.finish(), rect));
+            current.push((hasher.finish(), rect, mesh.texture_id));
         }
 
         let frame = egui::Rect::from_min_size(Pos2::ZERO, vec2(self.width as f32 / self.density, self.height as f32 / self.density));
         let damage = if self.previous.len() == current.len() && !current.is_empty() {
             let mut changed: Option<egui::Rect> = None;
-            for (index, (signature, rect)) in current.iter().enumerate() {
-                let (old_signature, old_rect) = self.previous[index];
-                if *signature != old_signature {
+            for (index, (signature, rect, texture)) in current.iter().enumerate() {
+                let (old_signature, old_rect, _) = self.previous[index];
+                let texture_changed = !uploaded.is_empty() && uploaded.contains(texture);
+                if *signature != old_signature || texture_changed {
                     let both = rect.union(old_rect).expand(1.0);
                     changed = Some(changed.map_or(both, |acc| acc.union(both)));
                 }

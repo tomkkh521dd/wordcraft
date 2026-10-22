@@ -266,7 +266,7 @@ pub fn file_dialog(request: FileDialogRequest) -> Receiver<FileDialogAnswer> {
     let (kind, params) = match request {
         FileDialogRequest::Open { purpose } => ("pickOpen", json!({"purpose": purpose})),
         FileDialogRequest::OpenMany { purpose } => ("pickOpen", json!({"purpose": purpose, "many": true})),
-        FileDialogRequest::Save { name } => ("pickSave", json!({"name": name})),
+        FileDialogRequest::Save { name, .. } => ("pickSave", json!({"name": name})),
     };
     let reply = host::host().request(kind, params);
     let (sender, receiver) = channel();
@@ -400,7 +400,7 @@ mod tests {
         );
 
         // Save suggests a name; cancelling is an empty answer, not an error.
-        let receiver = file_dialog(FileDialogRequest::Save { name: "Document1.docx".into() });
+        let receiver = file_dialog(FileDialogRequest::Save { name: "Document1.docx".into(), dir: None });
         let request = answer_next(r#"{"cancelled":true}"#);
         assert_eq!(request["kind"], "pickSave");
         assert_eq!(request["name"], "Document1.docx");

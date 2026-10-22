@@ -28,8 +28,10 @@ use crate::host;
 
 /// How often the clipboard is re-read while something may paste it.
 const CLIPBOARD_REFRESH: Duration = Duration::from_millis(400);
-/// How long a paste waits for the answer to a read it asked for (one frame on the device).
-const ANSWER_WAIT: Duration = Duration::from_millis(300);
+/// How long a paste waits for the answer to a read it asked for. One frame on the device, but a
+/// clipboard holding a copied *picture* has to be packed into the app's cache first, which took
+/// longer than 300 ms on the tablet and left the paste looking at an empty answer.
+const ANSWER_WAIT: Duration = Duration::from_millis(1500);
 /// How long the background read waits for the platform at all.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// The largest clipboard picture that may be pasted (as `insert.picture` allows).

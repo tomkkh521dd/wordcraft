@@ -282,10 +282,14 @@ impl App {
     }
 
     fn resize_buffer(&mut self) {
-        match frame_len(self.width, self.height) {
-            Some(len) => self.pixels.resize(len, 0),
-            None => self.pixels = Vec::new(),
-        }
+        // A fresh allocation, not a `resize` of the old one: the bytes of a buffer of another size
+        // are not a frame, and a partial repaint over them showed up as black areas with a few
+        // white patches on the tablet.
+        self.pixels = match frame_len(self.width, self.height) {
+            Some(len) => vec![0; len],
+            None => Vec::new(),
+        };
+        self.invalidate_frame();
     }
 
     pub fn focus(&mut self, focused: bool) {

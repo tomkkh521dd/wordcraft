@@ -1374,6 +1374,11 @@ struct Index {
           this.detachInputMethod();
         })
         .onTouch((event: TouchEvent) => {
+          // A mouse click arrives here as well as in `onMouse`: two pointer events for one click
+          // make egui read a double click and select a word at random.
+          if (event.sourceTool === SourceTool.MOUSE) {
+            return;
+          }
           // Two or more fingers are a pinch or a scroll (the gestures below handle them), never a
           // selection: the page must not see them as a pointer at all, or the selection would jump.
           this.touching = event.touches.length;

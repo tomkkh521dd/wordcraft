@@ -260,6 +260,9 @@ impl App {
         self.height = height;
         self.density = density;
         self.resize_buffer();
+        // The buffer now holds something else (a new allocation, or the old one at another size):
+        // nothing of the previous frame can be reused, so the next frame must paint all of it.
+        self.invalidate_frame();
         log::info!("surface: {width}x{height} at {density}x");
     }
 
@@ -270,6 +273,12 @@ impl App {
         self.height = 0;
         self.pixels = Vec::new();
         log::info!("surface gone");
+    }
+
+    /// Forget what the previous frame looked like, so the next paint covers the whole window.
+    fn invalidate_frame(&mut self) {
+        self.previous.clear();
+        self.damage = None;
     }
 
     fn resize_buffer(&mut self) {

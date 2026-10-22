@@ -57,9 +57,34 @@ fn clipboard() -> &'static Mutex<Clipboard> {
 }
 
 /// The text on the system clipboard, if any.
+///
+/// A clipboard holding only copied *pictures* (a file manager's Copy, which arrives as `text/uri`
+/// records) is reported as their paths: the UI's paste then inserts them as pictures, the same way
+/// it does on the desktop, where a copied file puts its path on the clipboard as text.
 pub fn clipboard_text() -> Option<String> {
     refresh_clipboard();
-    clipboard().lock().ok().and_then(|c| c.text.clone())
+    let cache = match clipboard().lock() {
+        Ok(cache) => cache,
+        Err(_) => return None,
+    };
+    if let Some(text) = cache.text.clone() {
+        return Some(text);
+    }
+    if !cache.files.is_empty() && cache.files.iter().all(|path| is_picture_file(path)) {
+        let paths: Vec<String> = cache.files.iter().map(|path| path.to_string_lossy().into_owned()).collect();
+        log::debug!("clipboard holds {} copied picture(s): reporting their paths so a paste inserts them", paths.len());
+        return Some(paths.join(
+            "
+",
+        ));
+    }
+    None
+}
+
+/// Whether a path names a picture the engine can insert (the extensions `paste_picture` accepts).
+fn is_picture_file(path: &std::path::Path) -> bool {
+    const PICTURES: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "wmf", "emf"];
+    path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| PICTURES.iter().any(|known| known.eq_ignore_ascii_case(ext)))
 }
 
 /// The HTML on the system clipboard (another program's formatted copy), if any.
@@ -108,6 +133,15 @@ pub fn set_clipboard_html(html: &str, text: &str, mathml: &str) -> bool {
         cache.answered = Some(now);
     }
     true
+}
+
+/// Read the clipboard now, e.g. when the app comes back to the foreground: a copied picture's
+/// grant can lapse while another app is in front, so the copy has to be made while it still holds.
+pub fn preload_clipboard() {
+    if let Ok(mut cache) = clipboard().lock() {
+        cache.asked = None;
+    }
+    refresh_clipboard();
 }
 
 /// Ask the platform for the clipboard when the cache is old, and wait for the answer when the
@@ -420,6 +454,31 @@ mod tests {
         assert!(!big.exists(), "an oversized picture is not left in the cache folder");
         assert_eq!(take_picture(&dir.join("missing.png").to_string_lossy(), 8), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copied_pictures_read_as_their_paths() {
+        let _guard = BRIDGE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        drain();
+        // A file manager's Copy arrives as text/uri records and no text: a paste must still insert
+        // the picture, which the UI does when the clipboard text names a picture file.
+        if let Ok(mut cache) = clipboard().lock() {
+            cache.asked = None;
+            cache.text = None;
+            cache.files.clear();
+        }
+        let platform = answer_when_asked(r#"{"formats":["text/uri"],"uris":["/data/storage/el2/base/cache/shot.png"]}"#);
+        assert_eq!(clipboard_text().as_deref(), Some("/data/storage/el2/base/cache/shot.png"));
+        platform.join().expect("the platform thread finishes");
+        // A copied document is not a picture: pasting it as text would be wrong, so nothing is pasted.
+        if let Ok(mut cache) = clipboard().lock() {
+            cache.asked = None;
+            cache.text = None;
+            cache.files.clear();
+        }
+        let platform = answer_when_asked(r#"{"formats":["text/uri"],"uris":["/data/storage/el2/base/cache/report.docx"]}"#);
+        assert_eq!(clipboard_text(), None);
+        platform.join().expect("the platform thread finishes");
     }
 
     #[test]

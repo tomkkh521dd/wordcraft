@@ -340,6 +340,14 @@ napi_value DocumentPath(napi_env env, napi_callback_info info) {
     return out;
 }
 
+/* clipboardPreload(): read the clipboard now (the page just came to the foreground) */
+napi_value ClipboardPreload(napi_env env, napi_callback_info info) {
+    (void)env;
+    (void)info;
+    wc_clipboard_preload();
+    return Undefined(env);
+}
+
 /* zoom(factor): a pinch (1.0 changes nothing) */
 napi_value Zoom(napi_env env, napi_callback_info info) {
     napi_value argv[1];
@@ -556,6 +564,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"ready", nullptr, Ready, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"documentPath", nullptr, DocumentPath, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"clipboardPreload", nullptr, ClipboardPreload, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"zoom", nullptr, Zoom, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"scrollFling", nullptr, ScrollFling, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"flinging", nullptr, Flinging, nullptr, nullptr, nullptr, napi_default, nullptr},

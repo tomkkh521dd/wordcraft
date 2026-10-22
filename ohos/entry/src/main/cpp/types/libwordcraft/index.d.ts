@@ -22,6 +22,8 @@ export const focus: (focused: boolean) => void;
 
 /** 1 when a frame was presented. */
 export const render: () => number;
+/** The page came to the foreground: read the clipboard now, before a copied file's grant lapses. */
+export const clipboardPreload: () => void;
 /** The page is up: ask the shell for a document to open (an "open with" URI, or last time's). */
 export const ready: () => void;
 /** The current document's sandbox path, or '' when nothing is open. */

@@ -217,6 +217,13 @@ pub extern "C" fn wc_document_path_len() -> usize {
     DOCUMENT_PATH.with(|slot| slot.try_borrow().ok().and_then(|slot| slot.as_ref().map(String::len)).unwrap_or(0))
 }
 
+/// The app came to the foreground: read the clipboard while a copied file's grant still holds, so a
+/// picture copied in another app is already in the cache when the user pastes it.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_clipboard_preload() {
+    wordcraft_ohos_app::preload_clipboard();
+}
+
 // --- touch gestures: a pinch and a fling ---------------------------------------------------
 
 /// Scale the page view by `factor` (a pinch; 1.0 changes nothing).

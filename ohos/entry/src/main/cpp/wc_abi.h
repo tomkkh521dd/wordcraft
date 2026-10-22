@@ -58,6 +58,9 @@ void wc_ready(void);
 const uint8_t *wc_document_path(void);
 size_t wc_document_path_len(void);
 
+/* The app came to the foreground: read the clipboard while a copied file's grant still holds. */
+void wc_clipboard_preload(void);
+
 /* --- touch gestures ----------------------------------------------------------------------- */
 
 /* Scale the page view (a pinch; 1.0 changes nothing). */

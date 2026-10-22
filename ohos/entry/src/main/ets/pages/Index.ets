@@ -41,10 +41,17 @@ const KEY_ARROW_UP: number = 2012;
 const KEY_ARROW_DOWN: number = 2013;
 const KEY_ARROW_LEFT: number = 2014;
 const KEY_ARROW_RIGHT: number = 2015;
+/** Picture extensions a copied file may have (lower case), for reading it through its URI. */
+const PICTURE_SUFFIXES: string[] = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'];
 /** The invisible character the composing field holds, so a Backspace has something to delete. */
 const IME_FIELD_SENTINEL: string = '​';
-/** Whether the keyboard types into a field on the caret (inline composition) or straight at the app. */
-const USE_IME_FIELD: boolean = true;
+/** Whether the keyboard types into a field on the caret (inline composition) or straight at the app.
+ *
+ * Off: with the Huawei IME on HarmonyOS 6.1.0 a field reset after every change cancels the
+ * composition, so 拼音 and 五笔 keys never commit (measured on the tablet: nothing appears).
+ * `inputMethod.attach` commits correctly; the field needs `onChange`'s `previewText` parameter to
+ * tell composition from committed text before it can come back. */
+const USE_IME_FIELD: boolean = false;
 /** The selection handle's finger-sized hit area (vp). */
 const HANDLE_TOUCH: number = 44;
 /** How close to the page's top or bottom a dragged handle scrolls, and by how much (vp). */
@@ -311,6 +318,16 @@ struct Index {
     // Save, export and Print-to-PDF all write into the sandbox; this puts the result where the
     // user picked, half a second later at the latest.
     this.copyTimer = setInterval(() => this.copyWorkingCopies(), COPY_OUT_INTERVAL_MS);
+  }
+
+  /**
+   * The page is in front again: cache the clipboard now (a picture copied in another app is only
+   * readable through the copying app's temporary grant, which lapses while we are in the background).
+   */
+  onPageShow(): void {
+    if (this.started) {
+      native.clipboardPreload();
+    }
   }
 
   /**
@@ -649,7 +666,36 @@ struct Index {
     }
   }
 
-    /** A `file://docs/…` URI as the sandbox path the engine works with ('' when it is not a file). */
+    /**
+   * A copied picture as a file in the app's cache folder, read through its URI: the picked file's
+   * grant covers the URI, not the path under /storage/Users, so pasting the path directly would
+   * silently fail. '' for anything that is not a picture (documents keep their path).
+   */
+  private pictureCopy(uri: string): string {
+    const lower: string = uri.toLowerCase();
+    const picture: boolean = PICTURE_SUFFIXES.some((suffix: string) => lower.endsWith(suffix));
+    if (!picture) {
+      return '';
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const suffix: string = lower.substring(lower.lastIndexOf('.'));
+      const path: string = `${context.cacheDir}/pasted-${Date.now()}${suffix}`;
+      const source: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+      try {
+        fileIo.copyFileSync(source.fd, path, 0);
+      } finally {
+        fileIo.closeSync(source);
+      }
+      hilog.info(DOMAIN, TAG, 'copied a clipboard picture to %{public}s', path);
+      return path;
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'could not read the copied picture: %{public}s', JSON.stringify(err));
+      return '';
+    }
+  }
+
+  /** A `file://docs/…` URI as the sandbox path the engine works with ('' when it is not a file). */
   private filePath(uri: string): string {
     try {
       return new fileUri.FileUri(uri).path;
@@ -684,9 +730,17 @@ struct Index {
       } else if (mime === pasteboard.MIMETYPE_PIXELMAP && picture === '') {
         picture = await this.packPicture(record);
       } else if (mime === pasteboard.MIMETYPE_TEXT_URI) {
-        const path: string = this.filePath(record.toPlainText());
-        if (path !== '') {
-          uris.push(path);
+        const uri: string = record.toPlainText();
+        // A copied picture is read through its URI (that is what the grant covers); the engine gets
+        // a sandbox copy, because the physical path under /storage/Users is not readable by us.
+        const local: string = this.pictureCopy(uri);
+        if (local !== '') {
+          uris.push(local);
+        } else {
+          const path: string = this.filePath(uri);
+          if (path !== '') {
+            uris.push(path);
+          }
         }
       }
     }

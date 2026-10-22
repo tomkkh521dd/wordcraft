@@ -129,22 +129,50 @@ pub struct KeyEvent {
     pub text: Option<char>,
 }
 
-/// Whether a key can produce text on its own: letters, digits, the typing punctuation and space.
+/// The character a typing key produces, from its code and the modifiers — never from the
+/// platform's `keyText`.
 ///
-/// ArkUI's `keyText` cannot be trusted for the others — an injected F11 arrived as `K` on a
-/// tablet, and Ctrl+S as `K` on an emulator — so text from a function key, an arrow or a chord is
-/// refused. Input-method text has its own entry (`wc_text`), so nothing is lost.
-pub fn types_text(code: i32) -> bool {
-    matches!(
-        code,
-        2000..=2009     // 0–9
-        | 2017..=2042   // A–Z
-        | 2043 | 2044   // , .
-        | 2050          // space
-        | 2056..=2064   // ` - = [ ] \ ; ' /
-        | 2066          // +
-    )
+/// HarmonyOS's soft keyboard sends key events for letters, and their `keyText` is not the key's
+/// character: on the tablet every letter arrived as `K` (injected keys do the same). Deriving the
+/// character from the code is exact; a hardware keyboard's letters, digits and punctuation are the
+/// same codes. Input-method text (`insertText`) never comes here.
+pub fn character_for(code: i32, modifiers: i32) -> Option<char> {
+    let shift = modifiers & crate::input::modifiers::SHIFT != 0;
+    let letter = match code {
+        2017..=2042 => Some((b'a' + (code - 2017) as u8) as char),
+        _ => None,
+    };
+    if let Some(letter) = letter {
+        return Some(if shift { letter.to_ascii_uppercase() } else { letter });
+    }
+    let digit = match code {
+        2000..=2009 => Some((b'0' + (code - 2000) as u8) as char),
+        _ => None,
+    };
+    if let Some(digit) = digit {
+        return Some(if shift { SHIFTED_DIGITS.get((code - 2000) as usize).copied().unwrap_or(digit) } else { digit });
+    }
+    let (plain, shifted) = match code {
+        2043 => (',', '<'),
+        2044 => ('.', '>'),
+        2050 => (' ', ' '),
+        2056 => ('`', '~'),
+        2057 => ('-', '_'),
+        2058 => ('=', '+'),
+        2059 => ('[', '{'),
+        2060 => (']', '}'),
+        2061 => ('\\', '|'),
+        2062 => (';', ':'),
+        2063 => ('\'', '"'),
+        2064 => ('/', '?'),
+        2066 => ('+', '*'),
+        _ => return None,
+    };
+    Some(if shift { shifted } else { plain })
 }
+
+/// The digits' shifted characters, in key-code order.
+const SHIFTED_DIGITS: [char; 10] = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'];
 
 /// ArkUI's `KeyCode` → egui's logical key. `None` for keys egui has no name for (media, volume,
 /// the modifier keys themselves — those travel as [`modifiers`] bits).

@@ -133,19 +133,22 @@ fn a_shortcut_never_types_its_key_text() {
     app.key(KeyEvent { code: 2038, pressed: true, repeated: false, modifiers: modifiers::META, text: Some('x') });
     assert_eq!(app.typed(), "", "a Ctrl or Meta chord types nothing");
     assert!(!app.pending_events().iter().any(|e| matches!(e, Event::Text(_))));
-    // Without Ctrl or Meta the character still arrives (AltGr-style text stays possible).
+    // Alt is a shortcut modifier too (Word uses it for the menu), so it types nothing either.
     app.key(KeyEvent { code: 2017, pressed: true, repeated: false, modifiers: modifiers::ALT, text: Some('@') });
-    assert_eq!(app.typed(), "@");
+    assert_eq!(app.typed(), "");
+    // A plain key types its own character, whatever the platform's `keyText` says.
+    app.key(KeyEvent { code: 2017, pressed: true, repeated: false, modifiers: 0, text: Some('@') });
+    assert_eq!(app.typed(), "a");
     // A released key types nothing either.
-    app.key(KeyEvent { code: 2017, pressed: false, repeated: false, modifiers: 0, text: Some('a') });
-    assert_eq!(app.typed(), "@");
+    app.key(KeyEvent { code: 2018, pressed: false, repeated: false, modifiers: 0, text: Some('b') });
+    assert_eq!(app.typed(), "a");
     // A key that cannot type carries no character, whatever the platform says: an injected F11
     // arrived with the text 'K' on a tablet.
     app.key(KeyEvent { code: 2100, pressed: true, repeated: false, modifiers: 0, text: Some('K') });
     app.key(KeyEvent { code: 2012, pressed: true, repeated: false, modifiers: 0, text: Some('k') });
-    assert_eq!(app.typed(), "@", "function and arrow keys type nothing");
-    assert!(input::types_text(2017) && input::types_text(2050) && input::types_text(2044));
-    assert!(!input::types_text(2100) && !input::types_text(2012) && !input::types_text(2054));
+    assert_eq!(app.typed(), "a", "function and arrow keys type nothing");
+    assert!(input::character_for(2017, 0).is_some() && input::character_for(2050, 0).is_some());
+    assert!(input::character_for(2100, 0).is_none() && input::character_for(2012, 0).is_none());
 }
 
 #[test]
@@ -208,6 +211,28 @@ fn input_method_text_arrives_as_preedit_then_commit() {
     app.ime_commit("");
     assert_eq!(app.pending_events().len(), 2);
     assert!(app.typed().is_empty(), "IME text is not typed character by character");
+}
+
+#[test]
+fn a_typed_character_comes_from_the_key_code() {
+    // HarmonyOS's soft keyboard sends letters as key events whose `keyText` is not the letter (every
+    // key arrived as `K` on the tablet), so the character is derived from the code instead.
+    let mut app = App::new();
+    app.key(KeyEvent { code: 2017, pressed: true, repeated: false, modifiers: 0, text: Some('K') });
+    app.key(KeyEvent { code: 2018, pressed: true, repeated: false, modifiers: modifiers::SHIFT, text: Some('K') });
+    app.key(KeyEvent { code: 2003, pressed: true, repeated: false, modifiers: 0, text: Some('K') });
+    app.key(KeyEvent { code: 2057, pressed: true, repeated: false, modifiers: 0, text: Some('K') });
+    app.key(KeyEvent { code: 2043, pressed: true, repeated: false, modifiers: modifiers::SHIFT, text: Some('K') });
+    assert_eq!(app.typed(), "aB3-<", "codes give the characters, whatever keyText says");
+    // Keys that cannot type still type nothing, and a Ctrl chord is a shortcut.
+    app.key(KeyEvent { code: 2017, pressed: true, repeated: false, modifiers: modifiers::CTRL, text: Some('K') });
+    app.key(KeyEvent { code: 2100, pressed: true, repeated: false, modifiers: 0, text: Some('K') });
+    assert_eq!(app.typed(), "aB3-<");
+    assert_eq!(crate::input::character_for(2017, 0), Some('a'));
+    assert_eq!(crate::input::character_for(2017, crate::input::modifiers::SHIFT), Some('A'));
+    assert_eq!(crate::input::character_for(2019, 0), Some('c'));
+    assert_eq!(crate::input::character_for(2050, 0), Some(' '));
+    assert_eq!(crate::input::character_for(2100, 0), None);
 }
 
 #[test]

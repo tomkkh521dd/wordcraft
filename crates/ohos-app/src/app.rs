@@ -8,7 +8,8 @@
 use std::time::Instant;
 
 use egui::{Event, MouseWheelUnit, Pos2, RawInput, Rect, TouchPhase, vec2};
-use wordcraft_engine::Session;
+use wordcraft_doc::Pos;
+use wordcraft_engine::{Selection, Session};
 use wordcraft_ui_egui::WordApp;
 use wordcraft_ui_paint::{Painter, Target};
 
@@ -83,6 +84,8 @@ pub struct App {
     /// A fling still in progress (points per second, positive = scrolling down and right), and the
     /// time it was last advanced.
     fling: (f32, f32),
+    /// The selection the last painted frame was drawn with (see `render`).
+    painted_selection: Selection,
     /// A document the platform asked to open at launch (a "open with" URI, or the document that
     /// was open last time), still on its way.
     startup: Option<std::sync::mpsc::Receiver<crate::host::Reply>>,
@@ -129,6 +132,7 @@ impl App {
             caret: None,
             caret_height: 0.0,
             fling: (0.0, 0.0),
+            painted_selection: Selection::caret(Pos::body(0, 0)),
             startup: None,
             last_frame: None,
             config,
@@ -435,12 +439,14 @@ impl App {
             if mods.is_empty() { "" } else { " " },
             mods
         ));
-        // Ctrl and Meta make a shortcut, never text, and only keys that can type carry a
-        // character: ArkUI's `keyText` is unreliable for both (Ctrl+S and an injected F11 both
-        // arrived with the text 'K'). A shortcut that types would corrupt the document.
-        let shortcut = event.modifiers & (modifiers::CTRL | modifiers::META) != 0;
-        let types = input::types_text(event.code);
-        if let Some(c) = event.text.filter(|_| event.pressed && !shortcut && types) {
+        // Ctrl, Alt and Meta make a shortcut, never text. The character comes from the key code: the
+        // platform's `keyText` is not the key's character (HarmonyOS's soft keyboard sends every
+        // letter as `K`, and Ctrl+S does the same), so trusting it typed "K" for every key.
+        let shortcut = event.modifiers & (modifiers::CTRL | modifiers::META | modifiers::ALT) != 0;
+        if event.pressed
+            && !shortcut
+            && let Some(c) = input::character_for(event.code, event.modifiers)
+        {
             self.text(c);
         }
     }
@@ -529,6 +535,13 @@ impl App {
 
         self.take_startup_document();
         self.advance_fling();
+        // A changed selection (a double click's word, a drag) repaints in full: the highlight spans
+        // several meshes and a partial repaint left it patchy for a frame on the tablet.
+        let selection = self.ui.session.sel.clone();
+        if selection != self.painted_selection {
+            self.painted_selection = selection;
+            self.invalidate_frame();
+        }
         let raw = self.take_raw_input();
         let had_input = !raw.events.is_empty();
         let ctx = self.ctx.clone();

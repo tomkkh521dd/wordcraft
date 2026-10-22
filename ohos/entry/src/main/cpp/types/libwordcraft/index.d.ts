@@ -22,6 +22,8 @@ export const focus: (focused: boolean) => void;
 
 /** 1 when a frame was presented. */
 export const render: () => number;
+/** The current document's sandbox path, or '' when nothing is open. */
+export const documentPath: () => string;
 /** Scale the page view by `factor` (a pinch; 1.0 changes nothing). */
 export const zoom: (factor: number) => void;
 /** Continue a scroll after the fingers lift: release velocity in vp/s, positive = scrolling down. */

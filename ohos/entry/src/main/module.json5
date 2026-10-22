@@ -34,7 +34,19 @@
         ]
       }
     ],
-    // No permissions: documents arrive through the system picker, which grants per-file access.
-    "requestPermissions": []
+    // Documents arrive through the system picker, which grants per-file access. The one declared
+    // permission keeps those per-file grants across a restart, so Recent, autosave and recovery can
+    // reopen the user's own file instead of a copy (`ohos.permission.FILE_ACCESS_PERSIST`, normal,
+    // system-granted; AppGallery asks for the restricted-permission declaration at release).
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.FILE_ACCESS_PERSIST",
+        "reason": "$string:file_access_persist_reason",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      }
+    ]
   }
 }

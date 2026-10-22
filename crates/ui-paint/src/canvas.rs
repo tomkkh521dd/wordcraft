@@ -112,7 +112,6 @@ impl<'a> Canvas<'a> {
             }
         }
     }
-
 }
 
 /// Premultiplied "source over": `out = src + dst * (1 - src.a)`.

@@ -47,6 +47,13 @@ void wc_ime_preview(const uint8_t *text, size_t len);
 /* The committed text (UTF-8, borrowed for this call): one undoable insert. */
 void wc_ime_commit(const uint8_t *text, size_t len);
 
+/* --- the document's file ------------------------------------------------------------------ */
+
+/* The document's path (UTF-8), or null; call wc_document_path_len() *after* this, and use the bytes
+ * before the next wc_document_path() call. */
+const uint8_t *wc_document_path(void);
+size_t wc_document_path_len(void);
+
 /* --- touch gestures ----------------------------------------------------------------------- */
 
 /* Scale the page view (a pinch; 1.0 changes nothing). */

@@ -141,6 +141,8 @@ mod tests {
     fn a_request_reaches_the_platform_and_its_answer_comes_back() {
         let _guard = BRIDGE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let host = host();
+        // Tests run in one process: another test's `App::new` may have left a startup question.
+        while host.take().is_some() {}
         let receiver = host.request("pickOpen", serde_json::json!({"purpose": "document"}));
         let line = host.take().expect("a request is waiting");
         let request: serde_json::Value = serde_json::from_str(&line).expect("the request is JSON");

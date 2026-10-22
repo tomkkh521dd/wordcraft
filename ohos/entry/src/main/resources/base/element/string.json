@@ -1,6 +1,10 @@
 {
   "string": [
     {
+      "name": "file_access_persist_reason",
+      "value": "Keep access to the documents you opened, so they reopen where you left them."
+    },
+    {
       "name": "module_desc",
       "value": "WordCraft word processor"
     },

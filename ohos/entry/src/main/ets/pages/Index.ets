@@ -5,9 +5,10 @@ import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { inputMethod } from '@kit.IMEKit';
 import { i18n } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
+import { fileIo, fileShare, fileUri, picker } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { preferences } from '@kit.ArkData';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'WordCraft';
@@ -230,6 +231,12 @@ struct Index {
   @State private handleX: number = 0;
   @State private handleY: number = 0;
   @State private handleHeight: number = 0;
+  /** The document the app had open, so a relaunch reopens it ("resume where you left"). */
+  private lastDocument: string = '';
+  /** The URI another app asked us to open (the file manager's "open with"). */
+  private launchUri: string = '';
+  /** Where the sandbox ↔ URI table and the last document are kept between launches. */
+  private store: preferences.Preferences | undefined = undefined;
 
   aboutToAppear(): void {
     const context: common.UIAbilityContext | undefined = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -268,6 +275,12 @@ struct Index {
     const rc: number = native.init(settingsDir, tmpDir, fontDirs, locale, theme, 'sample');
     hilog.info(DOMAIN, TAG, 'app started (%{public}d) with %{public}d font folder(s)', rc, fontDirs.length);
     this.started = rc === 0;
+    // The document another app asked us to open, and what was open last time.
+    const launch: string | undefined = AppStorage.get<string>('wordcraft.launchUri');
+    if (launch !== undefined && launch !== '') {
+      this.launchUri = launch;
+    }
+    this.loadState(context);
     this.startFrames();
     // Save, export and Print-to-PDF all write into the sandbox; this puts the result where the
     // user picked, half a second later at the latest.
@@ -310,6 +323,7 @@ struct Index {
         this.answerHost(request);
       }
       this.followCaretHandle();
+      this.rememberDocument();
       if (native.render() === 1) {
         this.presented++;
         if (this.presented % 300 === 0) {
@@ -340,6 +354,8 @@ struct Index {
       this.pickOpen(parsed).then((json: string) => answer(json)).catch(failed);
     } else if (parsed.kind === 'pickSave') {
       this.pickSave(parsed).then((json: string) => answer(json)).catch(failed);
+    } else if (parsed.kind === 'startupDocument') {
+      this.startupDocument().then((json: string) => answer(json)).catch(failed);
     } else if (parsed.kind === 'clipboardRead') {
       this.readClipboard().then((json: string) => answer(json)).catch(failed);
     } else if (parsed.kind === 'clipboardWrite') {
@@ -404,6 +420,8 @@ struct Index {
     }
     this.targets.set(copy, uri);
     this.synced.delete(copy);
+    this.persistGrant(uri);
+    this.saveTargets();
     hilog.info(DOMAIN, TAG, 'saving through %{public}s to the picked file', copy);
     return JSON.stringify({ path: copy });
   }
@@ -441,6 +459,8 @@ struct Index {
     }
     this.targets.set(copy, uri);
     this.markSynced(copy);
+    this.persistGrant(uri);
+    this.saveTargets();
     return copy;
   }
 
@@ -615,6 +635,81 @@ struct Index {
     return JSON.stringify({ ok: true });
   }
 
+  /** Load the last document and the sandbox-path → picked-URI table, and re-activate the grants. */
+  private async loadState(context: common.UIAbilityContext): Promise<void> {
+    if (context === undefined) {
+      return;
+    }
+    try {
+      this.store = await preferences.getPreferences(context, { name: 'wordcraft' });
+      this.lastDocument = await this.store.get('lastDocument', '') as string;
+      const saved: string = await this.store.get('targets', '{}') as string;
+      const table: Record<string, string> = JSON.parse(saved) as Record<string, string>;
+      const policies: fileShare.PolicyInfo[] = [];
+      for (const copy of Object.keys(table)) {
+        const uri: string = table[copy];
+        this.targets.set(copy, uri);
+        policies.push({ uri: uri, operationMode: fileShare.OperationMode.READ_MODE | fileShare.OperationMode.WRITE_MODE });
+      }
+      if (policies.length > 0) {
+        // A persisted grant is not in force until it is activated again after a restart.
+        await fileShare.activatePermission(policies);
+        hilog.info(DOMAIN, TAG, 're-activated %{public}d persisted file grant(s)', policies.length);
+      }
+      hilog.info(DOMAIN, TAG, 'last document: %{public}s', this.lastDocument);
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'no saved state: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** Remember the sandbox-path → picked-URI table (so saves still reach the user's file). */
+  private async saveTargets(): Promise<void> {
+    if (this.store === undefined) {
+      return;
+    }
+    const table: Record<string, string> = {};
+    this.targets.forEach((uri: string, copy: string) => {
+      table[copy] = uri;
+    });
+    try {
+      await this.store.put('targets', JSON.stringify(table));
+      await this.store.flush();
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'could not remember the picked files: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** Remember which document is open, so a relaunch reopens it. */
+  private async saveLastDocument(path: string): Promise<void> {
+    if (this.store === undefined) {
+      return;
+    }
+    try {
+      await this.store.put('lastDocument', path);
+      await this.store.flush();
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'could not remember the document: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /**
+   * Ask HarmonyOS to keep the grant for a picked file across restarts (`FILE_ACCESS_PERSIST`); a
+   * persisted grant has to be activated again on the next launch (see `loadState`).
+   */
+  private async persistGrant(uri: string): Promise<void> {
+    try {
+      const policy: fileShare.PolicyInfo = {
+        uri: uri,
+        operationMode: fileShare.OperationMode.READ_MODE | fileShare.OperationMode.WRITE_MODE,
+      };
+      await fileShare.persistPermission([policy]);
+      hilog.info(DOMAIN, TAG, 'kept the grant for the picked file');
+    } catch (err) {
+      // Not fatal: the file still works for this session.
+      hilog.warn(DOMAIN, TAG, 'could not keep the grant: %{public}s', JSON.stringify(err));
+    }
+  }
+
   /**
    * Keep the input method where the document is: attach it when a caret appears (a soft keyboard
    * and the Chinese IME), move its candidate window to the caret, and detach when there is nothing
@@ -744,6 +839,46 @@ struct Index {
   private deleteForward(length: number): void {
     this.pressKey(KEY_DELETE, Math.max(1, length));
     this.afterInput();
+  }
+
+  /**
+   * The document to open at launch: the URI another app shared with us (the file manager's "open
+   * with"), else the working copy that was open when the app was last closed. `cancelled` when
+   * there is neither, which is the normal cold start.
+   */
+  private async startupDocument(): Promise<string> {
+    if (this.launchUri !== '') {
+      const uri: string = this.launchUri;
+      this.launchUri = '';
+      const copy: string = this.workingCopy(uri);
+      if (copy !== '') {
+        return JSON.stringify({ path: copy });
+      }
+      return JSON.stringify({ error: 'the file that asked to open could not be read' });
+    }
+    if (this.lastDocument !== '' && this.exists(this.lastDocument)) {
+      return JSON.stringify({ path: this.lastDocument });
+    }
+    return JSON.stringify({ cancelled: true });
+  }
+
+  /** Whether a sandbox path still exists (a cache clean-up may have taken it). */
+  private exists(path: string): boolean {
+    try {
+      fileIo.accessSync(path);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /** Remember the document the page is showing, so the next launch reopens it. */
+  private rememberDocument(): void {
+    const path: string = native.documentPath();
+    if (path !== '' && path !== this.lastDocument) {
+      this.lastDocument = path;
+      this.saveLastDocument(path);
+    }
   }
 
   /** Keep the handle on the caret's end, and hide it when there is nothing to edit. */

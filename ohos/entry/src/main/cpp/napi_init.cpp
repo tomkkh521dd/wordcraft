@@ -318,6 +318,20 @@ napi_value Text(napi_env env, napi_callback_info info) {
     return Undefined(env);
 }
 
+/* documentPath() -> the current document's path, or '' */
+napi_value DocumentPath(napi_env env, napi_callback_info info) {
+    (void)info;
+    const uint8_t *data = wc_document_path();
+    const size_t len = wc_document_path_len();
+    napi_value out = nullptr;
+    if (data == nullptr || len == 0) {
+        napi_create_string_utf8(env, "", 0, &out);
+        return out;
+    }
+    napi_create_string_utf8(env, reinterpret_cast<const char *>(data), len, &out);
+    return out;
+}
+
 /* zoom(factor): a pinch (1.0 changes nothing) */
 napi_value Zoom(napi_env env, napi_callback_info info) {
     napi_value argv[1];
@@ -526,6 +540,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"focus", nullptr, Focus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, Render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"documentPath", nullptr, DocumentPath, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"zoom", nullptr, Zoom, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"scrollFling", nullptr, ScrollFling, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"flinging", nullptr, Flinging, nullptr, nullptr, nullptr, napi_default, nullptr},

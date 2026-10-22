@@ -12,6 +12,23 @@ const TAG: string = 'WordCraft';
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'ability created');
+    // Another app asked us to open a document (the file manager's "open with", a mail attachment):
+    // the page picks it up and opens a working copy of it.
+    this.offerDocument(want);
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.offerDocument(want);
+  }
+
+  /** Hand a document Uri to the page, which owns the sandbox copies and the input method. */
+  private offerDocument(want: Want): void {
+    const uri: string = want.uri ?? '';
+    if (uri === '') {
+      return;
+    }
+    hilog.info(DOMAIN, TAG, 'asked to open %{public}s', uri);
+    AppStorage.setOrCreate<string>('wordcraft.launchUri', uri);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

@@ -185,6 +185,31 @@ pub unsafe extern "C" fn wc_ime_commit(text: *const u8, len: usize) {
     }
 }
 
+// --- the document's file ---------------------------------------------------------------------
+
+thread_local! {
+    /// The document's path last handed to ArkTS; it must stay alive while ArkTS reads it.
+    static DOCUMENT_PATH: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// The current document's path as UTF-8, or null. Call [`wc_document_path_len`] *after* this; the
+/// bytes stay valid until the next call.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_document_path() -> *const u8 {
+    let path = with(None, |app| app.document_path());
+    DOCUMENT_PATH.with(|slot| {
+        let Ok(mut slot) = slot.try_borrow_mut() else { return std::ptr::null() };
+        *slot = path;
+        slot.as_ref().map_or(std::ptr::null(), |path| path.as_ptr())
+    })
+}
+
+/// The byte length of the path [`wc_document_path`] returned.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_document_path_len() -> usize {
+    DOCUMENT_PATH.with(|slot| slot.try_borrow().ok().and_then(|slot| slot.as_ref().map(String::len)).unwrap_or(0))
+}
+
 // --- touch gestures: a pinch and a fling ---------------------------------------------------
 
 /// Scale the page view by `factor` (a pinch; 1.0 changes nothing).

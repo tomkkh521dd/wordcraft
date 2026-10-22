@@ -83,6 +83,9 @@ pub struct App {
     /// A fling still in progress (points per second, positive = scrolling down and right), and the
     /// time it was last advanced.
     fling: (f32, f32),
+    /// A document the platform asked to open at launch (a "open with" URI, or the document that
+    /// was open last time), still on its way.
+    startup: Option<std::sync::mpsc::Receiver<crate::host::Reply>>,
     last_frame: Option<Instant>,
 }
 
@@ -126,6 +129,7 @@ impl App {
             caret: None,
             caret_height: 0.0,
             fling: (0.0, 0.0),
+            startup: Some(crate::services::startup_document()),
             last_frame: None,
             config,
             notes,
@@ -154,6 +158,11 @@ impl App {
     /// The page view's zoom (1.0 = 100%), for tests and for the shell's logs.
     pub fn zoom(&self) -> f32 {
         self.ui.session.view.zoom
+    }
+
+    /// The document's file, as a path the platform can remember (the sandbox working copy).
+    pub fn document_path(&self) -> Option<String> {
+        self.ui.session.path.as_ref().map(|path| path.to_string_lossy().into_owned())
     }
 
     /// Whether the selection covers a range (a handle is drawn only when it does).
@@ -458,6 +467,26 @@ impl App {
         self.last = what;
     }
 
+    /// Open the document the platform offered at launch, once it arrives (an "open with" URI from
+    /// another app, or the document that was open when the app was last closed).
+    fn take_startup_document(&mut self) {
+        let Some(receiver) = self.startup.as_ref() else { return };
+        let reply = match receiver.try_recv() {
+            Ok(reply) => reply,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.startup = None;
+                return;
+            }
+        };
+        self.startup = None;
+        let Some(path) = reply.string("path").filter(|path| !path.is_empty()) else {
+            return;
+        };
+        log::info!("opening {} at launch", path);
+        let _ = self.ui.run("file.open", serde_json::json!({"path": path}));
+    }
+
     /// Run one UI pass and paint it. `Yes` when there is something to present.
     pub fn render(&mut self) -> FrameNeeded {
         if self.width == 0 || self.height == 0 {
@@ -471,6 +500,7 @@ impl App {
             }
         }
 
+        self.take_startup_document();
         self.advance_fling();
         let raw = self.take_raw_input();
         let had_input = !raw.events.is_empty();

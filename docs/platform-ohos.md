@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (files survive a restart: persisted file grants, the sandbox ↔ URI table and reopening the last document; previously minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -16,7 +16,8 @@ files the port touches**.
 | HAP project, C++ shell (NAPI + native window buffer), Rust app | ✅ builds and runs on the emulator |
 | The document UI (egui) on the surface | ✅ done: ribbon, ruler, pages, tables, lists, status bar |
 | Platform services: system font folders, locale, dark mode | ✅ done |
-| Platform services: file picker (open, save), clipboard (text, HTML, pictures) | ✅ done and verified on the emulator (see *Platform services*) |
+| Platform services: file picker (open, save), clipboard (text, HTML, pictures) | ✅ done and verified on the emulator and a tablet |
+| Files across restarts: persisted grants (`FILE_ACCESS_PERSIST`), the sandbox ↔ URI table, and reopening the last document | ✅ verified on a tablet (OHOS.9a) |
 | Touch: pinch zoom, two-finger scroll with momentum, long-press context menu, drag selection, selection handle | ✅ (OHOS.8a/b): pinch scales the page (`view.zoom`, 10–500%), two-finger pan scrolls and flings, a still finger opens the document's context menu, and a draggable handle at the selection's end extends it with edge auto-scroll; the *anchor* handle is next |
 | Input method (soft keyboard, Chinese IME, candidate window) | ✅ first version (OHOS.5a/b): attach, commit (one undo step), delete, Enter, cursor moves; the candidate window at the caret; the composing text stays in the keyboard's own bubble (the platform sends no preview text to self-drawn clients) |
 | Packaging (signed HAP), AppGallery | ⏳ planned (OHOS.6) |
@@ -228,6 +229,8 @@ HUAWEI BKY-W00, HarmonyOS 6.1.0.135 (API 24), 1840×2650 at 2.25×, 703 system f
 | Injected `uitest drag` | sends no intermediate moves on this firmware, so it looks like a 900 ms long press; use `swipe` for scripted drags |
 | Selection handle | a blue dot under the caret, redrawn from the page every frame; pressing it with Shift and dragging extended the collapsed caret into the whole paragraph under the finger, and the handle moved to the new end |
 | Back | the first Back closes the soft keyboard and stays in the app (it used to leave the app) |
+| Save survives a restart | saved `WordCraft-resume-test.docx` (10,594 bytes copied out, `kept the grant for the picked file`); force-stop, relaunch → `re-activated 1 persisted file grant(s)`, `last document: …documents/1/WordCraft-resume-test.docx`, `opening … at launch`; a bold change and Ctrl+S then wrote **10,600 bytes to the user's own file** |
+| "Open with" plumbing | `aa start … -U file://docs/…docx` reached the page (`asked to open …`) and became a working copy; reading it failed with `13900002` because an injected Want carries no grant — a file manager launch does |
 
 A real device adds one finding the emulator hid: **`keyText` is unreliable for injected and
 chorded keys in general**, not only for modifiers — an F11 carried the text `K`. Text is accepted
@@ -253,6 +256,13 @@ Two things only a device shows, both handled:
   to what the device has.
 - **Settings and logs.** `wordcraft_control_key::set_settings_dir(context.filesDir + "/settings")`
   at start-up; `WORDCRAFT_PROFILE_DIR` still overrides it for isolated runs.
+- **Files across restarts.** A picked file's grant is temporary: it is gone after a restart. Each
+  pick therefore asks HarmonyOS to keep it (`fileShare.persistPermission`, `READ|WRITE`, behind
+  `ohos.permission.FILE_ACCESS_PERSIST` — normal and system-granted, though AppGallery wants the
+  restricted-permission declaration at release), the sandbox ↔ URI table and the open document go
+  into `preferences`, and the next launch re-activates the grants (`fileShare.activatePermission`)
+  before the page asks the app to open the remembered document. Without that, a save after a
+  restart wrote only the sandbox copy and the user's file silently went stale.
 - **Files.** User documents come from `DocumentViewPicker` and are edited through working copies
   in `filesDir/documents/` (see *Files: the picker grants a file, not its folder*). The engine
   therefore reads and writes ordinary sandbox paths, so saving, autosave and crash recovery
@@ -313,6 +323,10 @@ Two things only a device shows, both handled:
   ms). Text sampling (bilinear per glyph pixel) and repainting only the damaged part of a frame
   are the next work; `cargo run -p wordcraft-ui-paint --release --example bench` prints the
   per-case numbers.
+- Files, what is still missing: the manifest does not declare file associations yet, so the file
+  manager cannot offer WordCraft in "Open with" (the `Want` → working-copy path is wired and was
+  exercised through `aa start -U`); Recent/autosave/recovery still name sandbox paths rather than
+  the user's folders; and a copy-out interrupted by a kill is not compensated on the next start.
 - Touch, what is still missing: the *anchor* end's handle (only the end being edited has one, so
   extending backwards means re-dragging), a magnifier while dragging, a pinch that keeps the point
   under the fingers fixed (the view zooms around its own centre), momentum friction tuned on
@@ -343,6 +357,7 @@ Two things only a device shows, both handled:
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | minor | OHOS.9a file safety: a picked file's grant is persisted (`FILE_ACCESS_PERSIST`) and re-activated on the next launch, the sandbox ↔ URI table and the open document are kept in `preferences`, and the app reopens the document it had — so a save after a restart reaches the user's own file (verified: 10,600 bytes written back). "Open with" arrives as a `Want` URI and becomes a working copy; the manifest association is still to come |
 | 2026-10-22 | minor | OHOS.8b selection handle: a dot under the caret (18 vp on a 44 vp hit area), refreshed every frame, dragged with a Shift press so the anchor stays put, scrolling the page near its edges; `wc_selection_range` tells a caret from a selection. Also: the first Back now closes the keyboard instead of leaving the app |
 | 2026-10-22 | minor | OHOS.8a touch first: a two-finger pinch zooms the page (10–500%, one `view.zoom` step per gesture update), a two-finger pan scrolls with per-frame momentum, and a still finger opens the document's context menu; the platform's own gesture recognisers are not used, because they withhold the single-finger stream and a slow drag then reads as a long press (measured on the tablet) |
 | 2026-10-22 | trivial | Rasteriser: the 1:1 blit copies whole texture rows when the source is contiguous (12.6 → 4.2 ms per 4.9 MP frame in the new `crates/ui-paint/examples/bench.rs`), and the general triangle path evaluates each edge function once per row and steps it per pixel (8000 glyph quads 50 → 38 ms); a full UI frame on the tablet paints in 36.8 ms instead of 46.2 |

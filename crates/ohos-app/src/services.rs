@@ -211,6 +211,13 @@ fn take_picture(path: &str, cap: u64) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// Ask the platform for the document to open at launch: a URI another app shared with us (the file
+/// manager's "open with"), or the working copy that was open when the app was last closed. The
+/// answer arrives on a later frame; `cancelled` means nothing to open.
+pub fn startup_document() -> Receiver<host::Reply> {
+    host::host().request("startupDocument", json!({}))
+}
+
 /// What the file dialogs ask of the platform: a picker, answered later through the bridge.
 pub fn file_dialog(request: FileDialogRequest) -> Receiver<FileDialogAnswer> {
     let (kind, params) = match request {
@@ -262,6 +269,12 @@ mod tests {
     use super::*;
     use crate::host::{BRIDGE_TEST_LOCK, Reply, host};
 
+    /// Drop requests a previous test left behind (one process: `App::new` asks for a startup
+    /// document, and other tests' answers may still be in flight).
+    fn drain() {
+        while host().take().is_some() {}
+    }
+
     /// Take the request the app queued and answer it.
     fn answer_next(json: &str) -> serde_json::Value {
         let line = host().take().expect("a request is waiting for the platform");
@@ -291,6 +304,7 @@ mod tests {
     #[test]
     fn copying_puts_text_and_html_on_the_clipboard_and_pastes_it_back() {
         let _guard = BRIDGE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        drain();
 
         // Copy: the platform is asked for both records, and a paste right after reads the cache.
         assert!(set_clipboard_html("<p>Hello</p>", "Hello", ""));
@@ -323,6 +337,7 @@ mod tests {
     #[test]
     fn the_picker_answers_a_path_or_a_cancellation() {
         let _guard = BRIDGE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        drain();
 
         // Open: the request says what for, and the picked sandbox path comes back.
         let receiver = file_dialog(FileDialogRequest::Open { purpose: "document".into() });
@@ -357,6 +372,7 @@ mod tests {
     #[test]
     fn a_copied_picture_or_file_is_pasted_from_its_path() {
         let _guard = BRIDGE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        drain();
 
         // ArkTS packs the clipboard's PixelMap into the cache folder; the bytes go to the UI.
         let dir = std::env::temp_dir().join(format!("wordcraft-ohos-services-{}", std::process::id()));

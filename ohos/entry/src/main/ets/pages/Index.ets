@@ -498,16 +498,42 @@ struct Index {
   /** Write every working copy whose file changed (a save, an export, a PDF) back to its URI. */
   private copyWorkingCopies(): void {
     this.targets.forEach((uri: string, copy: string) => {
-      let marker: string = '';
+      const marker: string = this.markerOf(copy);
+      if (marker === '' || this.synced.get(copy) === marker) {
+        return; // not written yet, or already in the user's file
+      }
+      if (this.copyOut(copy, uri, marker)) {
+        this.saveSynced();
+      }
+    });
+  }
+
+  /**
+   * Put one working copy into the user's file and check it arrived: the user's file must end up the
+   * same size as the copy, or the marker is left alone and the next tick tries again (a file that
+   * was closed, moved or deleted under us says so instead of pretending to have saved).
+   */
+  private copyOut(copy: string, uri: string, marker: string): boolean {
+    const bytes: number = this.sizeOf(copy);
+    try {
+      const source: fileIo.File = fileIo.openSync(copy, fileIo.OpenMode.READ_ONLY);
       try {
-        const info: fileIo.Stat = fileIo.statSync(copy);
-        marker = `${info.size}:${info.mtime}`;
-      } catch (err) {
-        return; // not written yet
+        const destination: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+        try {
+          fileIo.copyFileSync(source.fd, destination.fd, 0);
+        } finally {
+          fileIo.closeSync(destination);
+        }
+      } finally {
+        fileIo.closeSync(source);
       }
-      if (this.synced.get(copy) === marker) {
-        return;
-      }
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'could not write the document back: %{public}s', JSON.stringify(err));
+      return false;
+    }
+    const arrived: number = this.sizeOf(uri);
+    if (arrived >= 0 && arrived !== bytes) {
+      hilog.error(DOMAIN, TAG, 'the picked file has %{public}d bytes, the copy %{public}d: writing it again', arrived, bytes);
       try {
         const source: fileIo.File = fileIo.openSync(copy, fileIo.OpenMode.READ_ONLY);
         try {
@@ -520,12 +546,73 @@ struct Index {
         } finally {
           fileIo.closeSync(source);
         }
-        this.synced.set(copy, marker);
-        hilog.info(DOMAIN, TAG, 'wrote the document back to the picked file (%{public}s bytes)', marker);
       } catch (err) {
-        hilog.error(DOMAIN, TAG, 'could not write the document back: %{public}s', JSON.stringify(err));
+        hilog.error(DOMAIN, TAG, 'the second write also failed: %{public}s', JSON.stringify(err));
+        return false;
+      }
+    }
+    this.synced.set(copy, marker);
+    hilog.info(DOMAIN, TAG, 'wrote the document back to the picked file (%{public}s bytes)', marker);
+    return true;
+  }
+
+  /** A file's `size:mtime` marker, or '' when it cannot be read. */
+  private markerOf(path: string): string {
+    try {
+      const info: fileIo.Stat = fileIo.statSync(path);
+      return `${info.size}:${info.mtime}`;
+    } catch (err) {
+      return '';
+    }
+  }
+
+  /** A file's size in bytes, or -1 when it cannot be read (a sandbox path or a picked URI). */
+  private sizeOf(path: string): number {
+    try {
+      const info: fileIo.Stat = fileIo.statSync(path);
+      return info.size;
+    } catch (err) {
+      return -1;
+    }
+  }
+
+  /**
+   * The app was closed before a change reached the user's file (a save in the last half second, or
+   * a kill during the copy). Writing it now is the difference between "your document is safe" and
+   * a stale file with newer work hidden in the sandbox.
+   */
+  private compensate(): void {
+    let repaired: number = 0;
+    this.targets.forEach((uri: string, copy: string) => {
+      const marker: string = this.markerOf(copy);
+      if (marker === '' || this.synced.get(copy) === marker) {
+        return;
+      }
+      if (this.copyOut(copy, uri, marker)) {
+        repaired++;
       }
     });
+    if (repaired > 0) {
+      this.saveSynced();
+      hilog.info(DOMAIN, TAG, 'wrote back %{public}d document(s) that a previous run did not', repaired);
+    }
+  }
+
+  /** Remember which copies are already in the user's files (across restarts). */
+  private async saveSynced(): Promise<void> {
+    if (this.store === undefined) {
+      return;
+    }
+    const table: Record<string, string> = {};
+    this.synced.forEach((marker: string, copy: string) => {
+      table[copy] = marker;
+    });
+    try {
+      await this.store.put('synced', JSON.stringify(table));
+      await this.store.flush();
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'could not remember which files are up to date: %{public}s', JSON.stringify(err));
+    }
   }
 
     /** A `file://docs/…` URI as the sandbox path the engine works with ('' when it is not a file). */
@@ -651,11 +738,19 @@ struct Index {
         this.targets.set(copy, uri);
         policies.push({ uri: uri, operationMode: fileShare.OperationMode.READ_MODE | fileShare.OperationMode.WRITE_MODE });
       }
+      const markers: string = await this.store.get('synced', '{}') as string;
+      const known: Record<string, string> = JSON.parse(markers) as Record<string, string>;
+      for (const copy of Object.keys(known)) {
+        this.synced.set(copy, known[copy]);
+      }
       if (policies.length > 0) {
         // A persisted grant is not in force until it is activated again after a restart.
         await fileShare.activatePermission(policies);
         hilog.info(DOMAIN, TAG, 're-activated %{public}d persisted file grant(s)', policies.length);
       }
+      // Anything the previous run saved but never copied out is put right before the document is
+      // reopened, so the user never sees an older file than the one on screen.
+      this.compensate();
       hilog.info(DOMAIN, TAG, 'last document: %{public}s', this.lastDocument);
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'no saved state: %{public}s', JSON.stringify(err));

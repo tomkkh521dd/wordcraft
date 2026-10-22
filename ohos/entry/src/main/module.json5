@@ -30,6 +30,42 @@
             "actions": [
               "ohos.want.action.home"
             ]
+          },
+          // "Open with" from the file manager (and a tap on a document in a mail attachment): the
+          // file arrives as a `Want` URI and becomes a working copy (see `startupDocument`).
+          {
+            "entities": [
+              "entity.system.browsable"
+            ],
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "file",
+                "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              },
+              {
+                "scheme": "file",
+                "type": "application/msword"
+              },
+              {
+                "scheme": "file",
+                "type": "application/vnd.oasis.opendocument.text"
+              },
+              {
+                "scheme": "file",
+                "type": "application/rtf"
+              },
+              {
+                "scheme": "file",
+                "type": "text/markdown"
+              },
+              {
+                "scheme": "file",
+                "type": "text/plain"
+              }
+            ]
           }
         ]
       }

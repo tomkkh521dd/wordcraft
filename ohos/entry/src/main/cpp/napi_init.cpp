@@ -378,6 +378,12 @@ napi_value CaretPresent(napi_env env, napi_callback_info info) {
     return Number(env, wc_caret_present());
 }
 
+/* overlayOpen() -> 1 when the context menu (or another app-drawn overlay) is up */
+napi_value OverlayOpen(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_overlay_open());
+}
+
 /* selectionRange() -> 1 when text is selected */
 napi_value SelectionRange(napi_env env, napi_callback_info info) {
     (void)info;
@@ -557,6 +563,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"imeCommit", nullptr, ImeCommit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretPresent", nullptr, CaretPresent, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"selectionRange", nullptr, SelectionRange, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"overlayOpen", nullptr, OverlayOpen, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretX", nullptr, CaretX, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretY", nullptr, CaretY, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretHeight", nullptr, CaretHeight, nullptr, nullptr, nullptr, napi_default, nullptr},

@@ -31,6 +31,7 @@ const MOD_CAPS: number = 16;
 /** Most pixels of a clipboard picture that may be pasted (`paste_picture::MAX_PIXELS`). */
 const MAX_PASTE_PIXELS: number = 50000000;
 /** ArkUI key codes the input method's actions turn into (see `@ohos.multimodalInput.keyCode`). */
+const KEY_ESCAPE: number = 2070;
 const KEY_ENTER: number = 2054;
 const KEY_BACKSPACE: number = 2055;
 const KEY_DELETE: number = 2071;
@@ -295,6 +296,12 @@ struct Index {
   onBackPress(): boolean {
     if (this.imeAttached) {
       this.detachInputMethod();
+      return true;
+    }
+    if (native.overlayOpen() === 1) {
+      // Close the menu the app drew instead of leaving the app.
+      native.key(KEY_ESCAPE, true, false, 0, '');
+      native.key(KEY_ESCAPE, false, false, 0, '');
       return true;
     }
     return false;

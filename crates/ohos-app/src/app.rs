@@ -155,6 +155,12 @@ impl App {
         self.frames
     }
 
+    /// Whether something the app itself draws is covering the document (the context menu): the
+    /// shell's Back gesture should close it rather than leave the app.
+    pub fn overlay_open(&self) -> bool {
+        self.ui.canvas.context_menu_open
+    }
+
     /// The page view's zoom (1.0 = 100%), for tests and for the shell's logs.
     pub fn zoom(&self) -> f32 {
         self.ui.session.view.zoom

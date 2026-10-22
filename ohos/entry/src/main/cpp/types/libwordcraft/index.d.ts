@@ -38,6 +38,8 @@ export const imePreview: (text: string) => void;
 /** The input method's committed text: one undoable insert. */
 export const imeCommit: (text: string) => void;
 
+/** 1 while a menu the app draws covers the document (Back closes it instead of the app). */
+export const overlayOpen: () => number;
 /** 1 when text is selected (a range), 0 for a plain caret. */
 export const selectionRange: () => number;
 /** 1 when the document is editing text (a caret is on screen). */

@@ -238,6 +238,12 @@ pub extern "C" fn wc_flinging() -> i32 {
     with(0, |app| i32::from(app.flinging()))
 }
 
+/// `1` when a menu the app draws is covering the document (so Back closes it, not the app).
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_overlay_open() -> i32 {
+    with(0, |app| i32::from(app.overlay_open()))
+}
+
 // --- the text caret, for the platform's input method -------------------------------------------
 
 /// `1` when the document is editing text (a caret is on screen), `0` otherwise.

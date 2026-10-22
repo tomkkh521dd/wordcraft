@@ -67,6 +67,9 @@ void wc_scroll_fling(float vx, float vy);
 /* 1 while a fling is still running. */
 int32_t wc_flinging(void);
 
+/* 1 when a menu the app draws covers the document (Back should close it, not the app). */
+int32_t wc_overlay_open(void);
+
 /* --- the text caret: where the input method's candidate window belongs ---------------------- */
 
 /* 1 when the document is editing text (a caret is on screen), 0 otherwise. */

@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (File › Share opens the system share sheet; previously minor ("Open with" from the file manager, and a verified copy-out that repairs a save killed mid-write on the next start; previously minor (files survive a restart: persisted file grants, the sandbox ↔ URI table and reopening the last document; previously minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (the keyboard now types into a field on the caret, so 拼音 composition is drawn in the page; previously minor (File › Share opens the system share sheet; previously minor ("Open with" from the file manager, and a verified copy-out that repairs a save killed mid-write on the next start; previously minor (files survive a restart: persisted file grants, the sandbox ↔ URI table and reopening the last document; previously minor (a selection handle under the caret that extends the selection from the far end, plus Back closing the keyboard; previously minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -21,7 +21,7 @@ files the port touches**.
 | "Open with" from the file manager (`.docx/.doc/.odt/.rtf/.md/.txt`) | ✅ verified on a tablet (OHOS.9b) |
 | System share (File › Share ▸ Share Kit) | ✅ verified on a tablet (OHOS.9c) |
 | Touch: pinch zoom, two-finger scroll with momentum, long-press context menu, drag selection, selection handle | ✅ (OHOS.8a/b): pinch scales the page (`view.zoom`, 10–500%), two-finger pan scrolls and flings, a still finger opens the document's context menu, and a draggable handle at the selection's end extends it with edge auto-scroll; the *anchor* handle is next |
-| Input method (soft keyboard, Chinese IME, candidate window) | ✅ first version (OHOS.5a/b): attach, commit (one undo step), delete, Enter, cursor moves; the candidate window at the caret; the composing text stays in the keyboard's own bubble (the platform sends no preview text to self-drawn clients) |
+| Input method | ✅ (OHOS.5a/b + OHOS.10a): a one-line transparent `TextInput` sits on the caret and takes the keyboard, so 拼音 composition is drawn **in the page** by the platform, commits arrive one character at a time, Backspace works through a zero-width sentinel, Enter and hardware shortcuts are forwarded; the older `inputMethod.attach` path stays as `USE_IME_FIELD = false` |
 | Packaging (signed HAP), AppGallery | ⏳ planned (OHOS.6) |
 
 The desktop shell (`apps/wordcraft`, eframe/winit) is **not** used on HarmonyOS: winit has no
@@ -228,6 +228,7 @@ HUAWEI BKY-W00, HarmonyOS 6.1.0.135 (API 24), 1840×2650 at 2.25×, 703 system f
 | IME keys | Backspace arrived as `deleteLeft` and inserted two `2055` key presses; `完成` (Done) arrived as `sendFunctionKey` and inserted `Enter` (`2054`) |
 | IME commit | every commit arrives as one `insertText` and becomes one `ImeEvent::Commit`: typing `M`, `o` and 拼音 `mo` → 么 logged `ime commit "M"`, `"o"`, `"么"` and the document reads `Why share a studio?Mo 么` — one undo step per commit, not one per character |
 | IME composing text | typing 拼音 `mo` showed the candidates 么 摸 万 … and the letters only in the keyboard's own bubble: `setPreviewText` never fired (subscribed before `attach`, as the API requires) |
+| IME onto the caret (OHOS.10a) | a tap put a transparent `TextInput` on the caret and the keyboard opened from it; each key produced one `ime commit "i"`, `⌫` produced `key 2055` (the field's zero-width sentinel being deleted), `完成` produced `key 2054` |
 | Long press | a still finger for 600 ms opened the document's context menu (`pointer down secondary` at the finger, menu with 剪切/复制/粘贴/字体…); the trailing lift is swallowed so the menu stays open |
 | Drag selection | `uitest swipe` (which moves like a finger) reached the page as 33 pointer moves and selected the heading under it, with the mini toolbar above |
 | Injected `uitest drag` | sends no intermediate moves on this firmware, so it looks like a 900 ms long press; use `swipe` for scripted drags |
@@ -309,6 +310,18 @@ Two things only a device shows, both handled:
   one started (`POINTER_CANCEL`) and drive zoom (`wc_zoom` → `view.zoom`) and scroll/`wc_scroll_fling`
   (velocity decays per frame in Rust, and a touch stops it). The long press is a 600 ms timer on the
   same single-finger stream, so a drag cancels it the moment it moves 8 vp.
+- **Input method (composing field).** A self-drawn client gets no preview text from the Huawei IME, so
+  the composing letters would only ever appear in the keyboard's own bubble. The page therefore
+  keeps a one-line `TextInput` **on the caret** — transparent background, the page's text colour,
+  no caret of its own, `enablePreviewText(true)` — and focuses it when a tap leaves a caret. The
+  platform draws the composition there (in the page, underlined) and hands over committed text;
+  the field holds a zero-width sentinel so `⌫` has something to delete (an empty field swallows
+  the key and the document never hears about it), a two-way `$$` binding keeps it empty after
+  every commit, `onSubmit` forwards Enter, and `onKeyEvent` forwards hardware keys so the app's
+  shortcuts keep working. Three device findings are behind that shape: focusing a component the
+  same frame mounts it (error 150003) takes the app down unless the focus is deferred; a one-way
+  `text` binding kept the typed characters, so every commit re-sent the whole string; and
+  `backgroundColor(0x00000000)` painted an opaque black bar over the page.
 - **Input method.** The document is a self-drawn canvas, so the platform's text components never
   see a tap and no keyboard would appear. ArkTS binds the canvas to the input method itself
   (`inputMethod.getController().attach(...)`) whenever a tap leaves a caret (`wc_caret_present`,
@@ -348,13 +361,13 @@ Two things only a device shows, both handled:
   extending backwards means re-dragging), a magnifier while dragging, a pinch that keeps the point
   under the fingers fixed (the view zooms around its own centre), momentum friction tuned on
   hardware, and a Back key that also closes an open menu (it closes the keyboard first now).
-- Input method, what is still missing: the Huawei IME (6.1.0) sends no preview text to a
-  self-drawn client, so the composing letters are shown only by the keyboard's own bubble rather
-  than inside the page (the `Preedit` path is wired and draws them if an IME does send them); a
-  `TextInput`/`RichEditor` overlay at the caret is the fallback if inline composition is required.
-  Selection is not synchronised either (no `changeSelection`/`getLeftTextOfCursor`), so IME-driven
-  select-all, cut and copy have nothing to act on, and scrolling while typing moves the candidate
-  window only at the next keystroke.
+- Input method, what is still missing: inline composition has to be confirmed with a 拼音 keyboard
+  (the device's IME was in 五笔/English mode during the test, so the sentinel, commit, delete and
+  Enter paths are measured but the composition itself was not); the field's font is the interface's
+  rather than the run's, so a composition in a 14 pt serif paragraph is drawn at the caret's height
+  in the UI face; selection is not synchronised (`changeSelection`/`getLeftTextOfCursor`), so
+  IME-driven select-all, cut and copy have nothing to act on; and scrolling while typing moves the
+  field only at the next keystroke.
 - Clipboard pictures: the read path (packed PNG) and the paste path are unit-tested, but no device
   test has pasted a copied picture yet (a copy from 图库 or a file manager would exercise it).
   Reading another app's text worked without the restricted `ohos.permission.READ_PASTEBOARD` on
@@ -374,6 +387,7 @@ Two things only a device shows, both handled:
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | minor | OHOS.10a: the keyboard types into a transparent `TextInput` placed on the caret, so the platform draws 拼音 composition inside the page; commits are one character each, `⌫` works through a zero-width sentinel, Enter and hardware keys are forwarded. Three device traps recorded: focusing a not-yet-mounted component (150003) killed the app, a one-way `text` binding accumulated every commit, and a numeric colour painted an opaque bar |
 | 2026-10-22 | minor | OHOS.9c system share: File › Share hands the document to HarmonyOS's share sheet (`Services::share_file` → Share Kit), and the ribbon's 共享 button uses it when a host provides one; verified on the tablet with the file name, size and targets in the sheet |
 | 2026-10-22 | minor | OHOS.9b: "Open with" declared for `.docx/.doc/.odt/.rtf/.md/.txt` (the file manager lists WordCraft; choosing it opened the document), and a copy-out is now verified (size checked, one retry) with the `synced` marker persisted — a copy left behind by a kill is written back at the next start, before the document reopens |
 | 2026-10-22 | minor | OHOS.9a file safety: a picked file's grant is persisted (`FILE_ACCESS_PERSIST`) and re-activated on the next launch, the sandbox ↔ URI table and the open document are kept in `preferences`, and the app reopens the document it had — so a save after a restart reaches the user's own file (verified: 10,600 bytes written back). "Open with" arrives as a `Want` URI and becomes a working copy; the manifest association is still to come |

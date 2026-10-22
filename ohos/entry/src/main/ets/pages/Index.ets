@@ -41,6 +41,10 @@ const KEY_ARROW_UP: number = 2012;
 const KEY_ARROW_DOWN: number = 2013;
 const KEY_ARROW_LEFT: number = 2014;
 const KEY_ARROW_RIGHT: number = 2015;
+/** The invisible character the composing field holds, so a Backspace has something to delete. */
+const IME_FIELD_SENTINEL: string = '​';
+/** Whether the keyboard types into a field on the caret (inline composition) or straight at the app. */
+const USE_IME_FIELD: boolean = true;
 /** The selection handle's finger-sized hit area (vp). */
 const HANDLE_TOUCH: number = 44;
 /** How close to the page's top or bottom a dragged handle scrolls, and by how much (vp). */
@@ -198,6 +202,22 @@ struct Index {
    */
   private ime: inputMethod.InputMethodController = inputMethod.getController();
   private imeAttached: boolean = false;
+  /**
+   * The composing field: a one-line `TextInput` sitting exactly on the caret, styled like page text
+   * and kept empty. The platform's IME targets it, so 拼音 appears **in the page** (underlined, with
+   * the candidate bar above it) instead of only in the keyboard's own bubble — which is what a
+   * self-drawn client gets from `inputMethod.attach` alone on this firmware. Committed text arrives
+   * through `onChange` and goes into the document.
+   */
+  @State private imeFieldX: number = 0;
+  @State private imeFieldY: number = 0;
+  @State private imeFieldWidth: number = 0;
+  @State private imeFieldHeight: number = 0;
+  @State private imeFieldValue: string = IME_FIELD_SENTINEL;
+  @State private imeFieldShown: boolean = false;
+  private imeField: TextInputController = new TextInputController();
+  /** Whether the interface is in the dark theme (the composing field matches the page's text). */
+  private themeDark: boolean = false;
   /** Fingers on the page: two or more means a pinch or a scroll, never a selection drag. */
   private touching: number = 0;
   /** Set while a multi-finger gesture owns the page, so single-finger events are ignored. */
@@ -276,6 +296,7 @@ struct Index {
       theme = 'light';
     }
 
+    this.themeDark = theme === 'dark';
     const rc: number = native.init(settingsDir, tmpDir, fontDirs, locale, theme, 'sample');
     hilog.info(DOMAIN, TAG, 'app started (%{public}d) with %{public}d font folder(s)', rc, fontDirs.length);
     this.started = rc === 0;
@@ -829,13 +850,66 @@ struct Index {
   private followCaret(): void {
     if (native.caretPresent() === 0) {
       this.detachInputMethod();
+      this.hideImeField();
       return;
     }
-    if (!this.imeAttached) {
+    if (USE_IME_FIELD) {
+      this.showImeField();
+    } else if (!this.imeAttached) {
       this.attachInputMethod();
     } else {
       this.updateCursor();
     }
+  }
+
+  /**
+   * Put the composing field on the caret and focus it, which brings the keyboard up. The field is
+   * as wide as the page (so a composition has room) and exactly as tall as the caret's line.
+   */
+  private showImeField(): void {
+    const x: number = native.caretX();
+    const y: number = native.caretY();
+    const height: number = Math.max(12, native.caretHeight());
+    const width: number = Math.max(120, this.pageWidthVp() - x);
+    this.imeFieldX = x;
+    this.imeFieldY = y;
+    this.imeFieldHeight = height;
+    this.imeFieldWidth = width;
+    if (!this.imeFieldShown) {
+      this.imeFieldShown = true;
+    }
+    this.imeFieldValue = IME_FIELD_SENTINEL;
+    // Focusing has to wait until the field is on screen: asking for a component that the same frame
+    // is still mounting took the whole app down (measured: `HandleAppDied` right after the tap).
+    setTimeout(() => {
+      try {
+        this.getUIContext().getFocusController().requestFocus('imeField');
+      } catch (err) {
+        // 150003 is "no such node": the field has not been laid out yet; try once more shortly.
+        hilog.warn(DOMAIN, TAG, 'composing field not there yet: %{public}s', JSON.stringify(err));
+        setTimeout(() => {
+          try {
+            this.getUIContext().getFocusController().requestFocus('imeField');
+          } catch (errToo) {
+            hilog.error(DOMAIN, TAG, 'could not focus the composing field: %{public}s', JSON.stringify(errToo));
+          }
+        }, 150);
+      }
+    }, 30);
+  }
+
+  private hideImeField(): void {
+    if (!this.imeFieldShown) {
+      return;
+    }
+    this.imeFieldShown = false;
+    this.imeFieldValue = IME_FIELD_SENTINEL;
+  }
+
+  /** The page width in vp, from the surface the shell reported. */
+  private pageWidthVp(): number {
+    const rect: SurfaceRect = this.controller.getXComponentSurfaceRect();
+    return rect.surfaceWidth / density();
   }
 
   /** Attach the input method (the keyboard comes up) and listen for what it sends. */
@@ -1018,6 +1092,11 @@ struct Index {
       this.lastDocument = path;
       this.saveLastDocument(path);
     }
+  }
+
+  /** The composing text's colour: the theme's text colour, so it reads as page text. */
+  private imeFieldColour(): string {
+    return this.themeDark ? '#ffe8e8e8' : '#ff202020';
   }
 
   /** Keep the handle on the caret's end, and hide it when there is nothing to edit. */
@@ -1305,6 +1384,57 @@ struct Index {
           }
           native.key(event.keyCode, event.type === KeyType.Down, false, modifierBits(event), event.keyText);
         })
+
+      // The composing field: invisible but for the IME's own text, sitting on the caret's line.
+      if (this.imeFieldShown) {
+        // `$$` both ways: the field shows what the state says, so clearing it after a commit
+        // really empties it (a one-way `text` kept the typed characters and every commit then
+        // carried the whole accumulated string).
+        TextInput({ text: $$this.imeFieldValue, controller: this.imeField })
+          .id('imeField')
+          .width(this.imeFieldWidth)
+          .height(this.imeFieldHeight)
+          .position({ x: this.imeFieldX, y: this.imeFieldY })
+          .fontSize(Math.max(10, this.imeFieldHeight * 0.78))
+          .fontColor(this.imeFieldColour())
+          .caretColor('#00000000')
+          .backgroundColor('#00000000')
+          .borderWidth(0)
+          .padding(0)
+          .maxLines(1)
+          .enablePreviewText(true)
+          .enterKeyType(EnterKeyType.Done)
+          .onChange((value: string) => {
+            // Only committed text lands in `value` (the composition is preview). The field holds a
+            // zero-width sentinel so a Backspace from the keyboard deletes *something*: an empty
+            // field swallows it and the document never hears about the delete.
+            if (value === IME_FIELD_SENTINEL) {
+              return;
+            }
+            if (value === '') {
+              // The sentinel itself was deleted: that is Backspace.
+              this.pressKey(KEY_BACKSPACE);
+            } else if (value.startsWith(IME_FIELD_SENTINEL)) {
+              const text: string = value.substring(IME_FIELD_SENTINEL.length);
+              if (text !== '') {
+                native.imeCommit(text);
+              }
+            } else {
+              // Typed over the sentinel (a paste or an IME that replaces it): the whole value is new.
+              native.imeCommit(value);
+            }
+            this.imeFieldValue = IME_FIELD_SENTINEL;
+          })
+          .onSubmit(() => this.pressKey(KEY_ENTER))
+          .onKeyEvent((event: KeyEvent) => {
+            if (event.type !== KeyType.Down && event.type !== KeyType.Up) {
+              return false;
+            }
+            // Hardware keys belong to the document (shortcuts, arrows, Backspace), not the field.
+            native.key(event.keyCode, event.type === KeyType.Down, false, modifierBits(event), '');
+            return true;
+          })
+      }
 
       // The selection handle: a dot under the caret's end, on a finger-sized hit area. Dragging it
       // extends the selection from the other end (a Shift press keeps the anchor), and near the top

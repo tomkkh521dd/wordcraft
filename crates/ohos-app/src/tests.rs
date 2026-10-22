@@ -149,6 +149,52 @@ fn a_shortcut_never_types_its_key_text() {
 }
 
 #[test]
+fn a_pinch_scales_the_page_within_the_view_range() {
+    let mut app = App::new();
+    let before = app.zoom();
+    app.zoom_by(2.0);
+    let doubled = app.zoom();
+    assert!((doubled - before * 2.0).abs() < 0.01, "a pinch scales the page: {before} → {doubled}");
+    // `view.zoom` clamps to the View tab's 10–500%, and a hostile factor never leaves the range.
+    app.zoom_by(1.0e9);
+    assert!((app.zoom() - 5.0).abs() < 0.01, "zoom stops at 500%");
+    app.zoom_by(1.0e-9);
+    assert!((app.zoom() - 0.1).abs() < 0.01, "zoom stops at 10%");
+    // A factor that is not a positive number changes nothing (a pinch event with scale 0 or NaN).
+    let steady = app.zoom();
+    app.zoom_by(0.0);
+    app.zoom_by(f32::NAN);
+    app.zoom_by(-1.0);
+    assert!((app.zoom() - steady).abs() < 1.0e-6, "0, NaN and negative factors are ignored");
+}
+
+#[test]
+fn a_fling_runs_and_settles() {
+    let mut app = App::new();
+    app.resize(1200, 800, 1.5);
+    for _ in 0..3 {
+        app.render();
+    }
+    // Letting go while barely moving is a stop, not a fling.
+    app.fling(40.0, -30.0);
+    assert!(!app.flinging());
+    // A throw scrolls on and comes to rest by itself.
+    app.fling(1500.0, -900.0);
+    assert!(app.flinging(), "a throw starts a fling");
+    let mut frames = 0;
+    while app.flinging() && frames < 400 {
+        app.render();
+        frames += 1;
+    }
+    assert!(!app.flinging(), "the fling settles after {frames} frames");
+    // Touching the page stops one immediately.
+    app.fling(1500.0, -900.0);
+    assert!(app.flinging());
+    app.pointer(PointerKind::Down, 100.0, 100.0, Button::None, 0);
+    assert!(!app.flinging(), "a touch stops the page");
+}
+
+#[test]
 fn input_method_text_arrives_as_preedit_then_commit() {
     // The composing text must reach egui as a Preedit event (the document draws it at the caret,
     // underlined) and the committed text as one Commit — not as a burst of separate characters.

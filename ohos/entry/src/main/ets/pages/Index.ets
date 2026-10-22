@@ -37,6 +37,8 @@ const KEY_ARROW_UP: number = 2012;
 const KEY_ARROW_DOWN: number = 2013;
 const KEY_ARROW_LEFT: number = 2014;
 const KEY_ARROW_RIGHT: number = 2015;
+/** How long a still finger takes to open the context menu (ms). */
+const LONG_PRESS_MS: number = 600;
 /** How often the working copies are compared with the files the user picked (ms). */
 const COPY_OUT_INTERVAL_MS: number = 500;
 
@@ -129,6 +131,12 @@ function mouseButton(button: MouseButton): number {
   }
 }
 
+/** Two numbers in vp (the fingers' midpoint), kept out of ArkUI's `Position` (Length, optional). */
+interface FingerMid {
+  x: number;
+  y: number;
+}
+
 /** A request from the Rust side (see crates/ohos-app/src/host.rs). */
 interface HostRequest {
   id: number;
@@ -180,6 +188,33 @@ struct Index {
    */
   private ime: inputMethod.InputMethodController = inputMethod.getController();
   private imeAttached: boolean = false;
+  /** Fingers on the page: two or more means a pinch or a scroll, never a selection drag. */
+  private touching: number = 0;
+  /** Set while a multi-finger gesture owns the page, so single-finger events are ignored. */
+  private multiTouch: boolean = false;
+  /** The finger spread the pinch started from (vp), and the scale already sent to the page. */
+  private pinchStart: number = 0;
+  private pinchApplied: number = 1;
+  /** The two fingers' midpoint, its velocity (vp/s) and when it last moved. */
+  private panMidX: number = 0;
+  private panMidY: number = 0;
+  private panVelocityX: number = 0;
+  private panVelocityY: number = 0;
+  private panMovedAt: number = 0;
+  /**
+   * Set when a long press opened the context menu: the finger's own up event must not reach the
+   * page, or it would close the menu the press just opened. Cleared when every finger is up.
+   */
+  private afterLongPress: boolean = false;
+  /**
+   * Where the current single-finger press started and whether it moved far enough to be a drag.
+   * A long press that turned into a drag must not open the context menu: dragging selects text.
+   */
+  private pressX: number = 0;
+  private pressY: number = 0;
+  private pressDragged: boolean = false;
+  /** The long-press timer of the current single-finger press (-1: none). */
+  private pressTimer: number = -1;
 
   aboutToAppear(): void {
     const context: common.UIAbilityContext | undefined = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -683,6 +718,120 @@ struct Index {
     this.afterInput();
   }
 
+  /**
+   * Two fingers drag the page and pinch it.
+   *
+   * The platform's own `PinchGesture`/`PanGesture` are deliberately not used: once one of them is
+   * attached to the `XComponent`, ArkUI withholds the single-finger touch stream from `onTouch`
+   * while it decides, so a slow drag could not be told from a press (measured on the tablet: the
+   * long-press menu opened in the middle of a selection drag, and the drag never reached the page).
+   * Reading the two touches that are already in `TouchEvent.touches` keeps text selection exact and
+   * costs a handful of lines.
+   */
+  private onMultiTouch(event: TouchEvent): void {
+    if (!this.multiTouch) {
+      // The first finger had started a caret drag or a selection; take it back.
+      this.multiTouch = true;
+      this.stopPressTimer();
+      native.pointer(POINTER_CANCEL, 0, 0, BUTTON_NONE, 0);
+      this.pinchStart = this.fingerSpan(event.touches);
+      this.pinchApplied = 1;
+      const mid: FingerMid = this.fingerMid(event.touches);
+      this.panMidX = mid.x;
+      this.panMidY = mid.y;
+      this.panVelocityX = 0;
+      this.panVelocityY = 0;
+      this.panMovedAt = Date.now();
+      return;
+    }
+    // A pinch: the spread between the fingers, against the spread it started with.
+    const span: number = this.fingerSpan(event.touches);
+    if (this.pinchStart > 8 && span > 8 && this.pinchApplied > 0) {
+      const scale: number = span / this.pinchStart;
+      if (Math.abs(scale - this.pinchApplied) > 0.005) {
+        native.zoom(scale / this.pinchApplied);
+        this.pinchApplied = scale;
+      }
+    }
+    // A two-finger scroll: the midpoint's movement, the opposite way (fingers down = page up).
+    const mid: FingerMid = this.fingerMid(event.touches);
+    const dx: number = mid.x - this.panMidX;
+    const dy: number = mid.y - this.panMidY;
+    if (dx !== 0 || dy !== 0) {
+      native.scroll(-dx, -dy);
+      const now: number = Date.now();
+      const dt: number = Math.max(1, now - this.panMovedAt) / 1000;
+      // Smoothed so one jittery sample cannot throw the page across the screen.
+      this.panVelocityX = 0.6 * this.panVelocityX + 0.4 * (-dx / dt);
+      this.panVelocityY = 0.6 * this.panVelocityY + 0.4 * (-dy / dt);
+      this.panMovedAt = now;
+      this.panMidX = mid.x;
+      this.panMidY = mid.y;
+    }
+  }
+
+  /** The fingers are gone: fling the page if it was still moving. */
+  private endMultiTouch(): void {
+    this.multiTouch = false;
+    this.pinchStart = 0;
+    this.pinchApplied = 1;
+    const idle: number = Date.now() - this.panMovedAt;
+    if (idle < 120) {
+      native.scrollFling(this.panVelocityX, this.panVelocityY);
+    }
+    this.panVelocityX = 0;
+    this.panVelocityY = 0;
+  }
+
+  /** The distance between the first two fingers (vp). */
+  private fingerSpan(touches: TouchObject[]): number {
+    if (touches.length < 2) {
+      return 0;
+    }
+    const dx: number = touches[1].x - touches[0].x;
+    const dy: number = touches[1].y - touches[0].y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  /** The midpoint of the first two fingers (vp). */
+  private fingerMid(touches: TouchObject[]): FingerMid {
+    if (touches.length < 2) {
+      return { x: 0, y: 0 };
+    }
+    return { x: (touches[0].x + touches[1].x) / 2, y: (touches[0].y + touches[1].y) / 2 };
+  }
+
+  /**
+   * A finger that stays still for [`LONG_PRESS_MS`] opens the document's context menu where it is,
+   * which is what a long press means on every touch platform. The platform's own
+   * `LongPressGesture` is deliberately not used: a recognised gesture takes the touch stream away
+   * from `onTouch`, and then a slow drag can no longer be told from a press (measured: the menu
+   * opened in the middle of a selection drag).
+   */
+  private startPressTimer(x: number, y: number): void {
+    this.pressX = x;
+    this.pressY = y;
+    this.pressDragged = false;
+    this.stopPressTimer();
+    this.pressTimer = setTimeout(() => {
+      this.pressTimer = -1;
+      if (this.pressDragged || this.multiTouch) {
+        return;
+      }
+      // The lift that ends this press belongs to the menu it opens, not to the page.
+      this.afterLongPress = true;
+      native.pointer(POINTER_DOWN, this.pressX, this.pressY, BUTTON_SECONDARY, 0);
+      native.pointer(POINTER_UP, this.pressX, this.pressY, BUTTON_SECONDARY, 0);
+    }, LONG_PRESS_MS);
+  }
+
+  private stopPressTimer(): void {
+    if (this.pressTimer !== -1) {
+      clearTimeout(this.pressTimer);
+      this.pressTimer = -1;
+    }
+  }
+
   /** A hardware-style key press: down, then up. */
   private pressKey(keyCode: number, times: number = 1): void {
     for (let i = 0; i < times; i++) {
@@ -722,6 +871,28 @@ struct Index {
           this.detachInputMethod();
         })
         .onTouch((event: TouchEvent) => {
+          // Two or more fingers are a pinch or a scroll (the gestures below handle them), never a
+          // selection: the page must not see them as a pointer at all, or the selection would jump.
+          this.touching = event.touches.length;
+          if (this.touching >= 2) {
+            this.onMultiTouch(event);
+            return;
+          }
+          if (this.multiTouch) {
+            if (this.touching === 0) {
+              // Every finger is up: throw the page on if it was still moving, and go back to
+              // single-finger editing.
+              this.endMultiTouch();
+            }
+            return;
+          }
+          if (this.afterLongPress) {
+            // The lift that ends a long press belongs to the menu it opened, not to the page.
+            if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+              this.afterLongPress = false;
+            }
+            return;
+          }
           // `touches` is empty on Up/Cancel in some versions; the changed touch is always there.
           const touch: TouchObject | undefined =
             event.touches.length > 0 ? event.touches[0] : (event.changedTouches.length > 0 ? event.changedTouches[0] : undefined);
@@ -731,10 +902,19 @@ struct Index {
           let kind: number = POINTER_MOVE;
           if (event.type === TouchType.Down) {
             kind = POINTER_DOWN;
+            this.startPressTimer(touch.x, touch.y);
+          } else if (event.type === TouchType.Move) {
+            // 8 vp of travel means the finger is dragging (a selection), not pressing.
+            if (Math.abs(touch.x - this.pressX) + Math.abs(touch.y - this.pressY) > 8) {
+              this.pressDragged = true;
+              this.stopPressTimer();
+            }
           } else if (event.type === TouchType.Up) {
             kind = POINTER_UP;
+            this.stopPressTimer();
           } else if (event.type === TouchType.Cancel) {
             kind = POINTER_CANCEL;
+            this.stopPressTimer();
           }
           native.pointer(kind, touch.x, touch.y, BUTTON_NONE, 0);
           // A tap that put a caret in the document is a request to type: bring up the keyboard.

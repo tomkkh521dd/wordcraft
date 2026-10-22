@@ -47,6 +47,15 @@ void wc_ime_preview(const uint8_t *text, size_t len);
 /* The committed text (UTF-8, borrowed for this call): one undoable insert. */
 void wc_ime_commit(const uint8_t *text, size_t len);
 
+/* --- touch gestures ----------------------------------------------------------------------- */
+
+/* Scale the page view (a pinch; 1.0 changes nothing). */
+void wc_zoom(float factor);
+/* Start a fling: release velocity in points per second, positive = scrolling down and right. */
+void wc_scroll_fling(float vx, float vy);
+/* 1 while a fling is still running. */
+int32_t wc_flinging(void);
+
 /* --- the text caret: where the input method's candidate window belongs ---------------------- */
 
 /* 1 when the document is editing text (a caret is on screen), 0 otherwise. */

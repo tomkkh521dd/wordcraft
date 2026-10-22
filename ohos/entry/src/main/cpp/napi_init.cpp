@@ -318,6 +318,38 @@ napi_value Text(napi_env env, napi_callback_info info) {
     return Undefined(env);
 }
 
+/* zoom(factor): a pinch (1.0 changes nothing) */
+napi_value Zoom(napi_env env, napi_callback_info info) {
+    napi_value argv[1];
+    if (!ArgCount(env, info, argv, 1)) {
+        return Undefined(env);
+    }
+    double factor = 1;
+    ReadDouble(env, argv[0], factor);
+    wc_zoom(static_cast<float>(factor));
+    return Undefined(env);
+}
+
+/* scrollFling(vx, vy): the release velocity of a two-finger scroll, in points per second */
+napi_value ScrollFling(napi_env env, napi_callback_info info) {
+    napi_value argv[2];
+    if (!ArgCount(env, info, argv, 2)) {
+        return Undefined(env);
+    }
+    double vx = 0;
+    double vy = 0;
+    ReadDouble(env, argv[0], vx);
+    ReadDouble(env, argv[1], vy);
+    wc_scroll_fling(static_cast<float>(vx), static_cast<float>(vy));
+    return Undefined(env);
+}
+
+/* flinging() -> 1 while a fling is still running */
+napi_value Flinging(napi_env env, napi_callback_info info) {
+    (void)info;
+    return Number(env, wc_flinging());
+}
+
 /* caretPresent() -> 1 when the document is editing text */
 napi_value CaretPresent(napi_env env, napi_callback_info info) {
     (void)info;
@@ -488,6 +520,9 @@ napi_value Init(napi_env env, napi_value exports) {
         {"focus", nullptr, Focus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, Render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"zoom", nullptr, Zoom, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"scrollFling", nullptr, ScrollFling, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"flinging", nullptr, Flinging, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"imePreview", nullptr, ImePreview, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"imeCommit", nullptr, ImeCommit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"caretPresent", nullptr, CaretPresent, nullptr, nullptr, nullptr, napi_default, nullptr},

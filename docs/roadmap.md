@@ -1,6 +1,6 @@
 # WordCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (M17: the HarmonyOS port runs the real UI and answers the file picker and the clipboard on the device; previously trivial: M6: Manage Sources imports Word's `Sources.xml`, #2640; previously minor: Czech proofing review fixes; previously minor: Portuguese proofing; previously minor: Polish interface and Polish proofing; previously trivial: M7: formatting revisions landed, #41; previously trivial: M5: Draw Table and Eraser landed, #303; previously minor: beta distance restated: ~15 points, ~150–230 h; previously: alpha gate checked: six core workflows pass; previously major: milestones moved here from ROADMAP.md; Current focus set from the re-measured gaps) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (M17 next steps: touch first, then file safety, the input method's composition, performance and release; previously minor: the HarmonyOS port runs the real UI and answers the file picker and the clipboard on the device; previously trivial: M6: Manage Sources imports Word's `Sources.xml`, #2640; previously minor: Czech proofing review fixes; previously minor: Portuguese proofing; previously minor: Polish interface and Polish proofing; previously trivial: M7: formatting revisions landed, #41; previously trivial: M5: Draw Table and Eraser landed, #303; previously minor: beta distance restated: ~15 points, ~150–230 h; previously: alpha gate checked: six core workflows pass; previously major: milestones moved here from ROADMAP.md; Current focus set from the re-measured gaps) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
 
 Forward-looking plan. The summary is [`ROADMAP.md`](../ROADMAP.md); the ranked work list is
 [`gaps.md`](gaps.md); the numbers are in [`target-app-parity.md`](target-app-parity.md). Hours are
@@ -66,6 +66,23 @@ partial rows are fidelity gaps (beta work), not broken workflows. WordCraft stay
 | M16 | Right-to-left and East Asian typography | RTL paragraphs done (#207) | 30–45 h |
 | M17 | HarmonyOS port (PC/2in1 and tablet, API 24+) | on the stack: the real UI, the system file picker and the clipboard run on the emulator; input method, signed HAP and AppGallery release outstanding | 12–20 h |
 
+### M17 next steps (HarmonyOS)
+
+The port opens, types, saves and pastes on a tablet; what it is missing is what makes a tablet
+*comfortable*, and what keeps a user's own file safe. In order:
+
+| Phase | Work | Done when (on the device) |
+|---|---|---|
+| A (1–2 wk) | Touch first: pinch zoom, two-finger scroll with momentum, long-press context menu, selection handles with edge auto-scroll, touch-density ribbon | a page zooms to 200%, a fling scrolls three pages, a long press opens the menu, a sentence can be selected and replaced by finger alone |
+| B (1 wk) | Files: `fileShare.persistPermission` so Recent/autosave/recovery point at the user's file, open-with from the file manager (`skills` + `Want`), system share of `.docx`/PDF, clipboard pictures, a write-back that survives an abnormal exit | a `.docx` opened from Files, edited, kept and reopened after a kill; the same document shared to another app |
+| C (3–5 d) | Input method: composing text drawn at the caret (a `TextInput` overlay at the caret is the only route the Huawei IME offers a self-drawn client), selection sync (`changeSelection`, `getLeftTextOfCursor`), hardware-keyboard parity sweep | pinyin letters visible in the page while composing; IME select-all/cut work; `docs/typing-parity.md` scenarios pass |
+| D (1 wk) | Performance: repaint only damaged pixels, glyph sampling with fixed-point weights, 300-page document and memory ceiling | typing under 5 ms a frame, a full frame under 16 ms, 300 pages open without growth |
+| E (2–3 wk) | Print (Print Kit or PDF + system print), Read Aloud (Core Speech Kit), phone/split-screen/foldable layouts, runtime dark mode and language switching (`onConfigurationUpdate`), multiple windows | the parity docs' hardware rows pass on hardware |
+| F (1 wk) | Release: AppGallery signing, privacy manifest, `READ_PASTEBOARD` if a firmware needs it, per-ABI bundles, a device regression script (uitest + screenshot comparison) in the nightly `cargo xtask ohos` | an installable, signed HAP from a clean machine, and a nightly run that fails on a visual regression |
+
+Deliberately not yet: a GPU renderer (the interface is isolated behind `ui-paint`), VBA/add-ins, and
+a phone-first layout before the tablet experience is settled.
+
 ## Next after beta
 
 Charts and SmartArt editing, the Draw tab, `.doc` writing, PDF Reflow, the remaining interface
@@ -75,6 +92,7 @@ languages, screen-reader access, ecosystem decisions (VBA, add-ins, cloud), an i
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | M17 next steps written down: touch first (pinch, momentum, long press, selection handles), then file safety (persisted URIs, open-with, share), the input method's composing text and selection sync, damaged-pixel repaints, print/TTS/layouts, and release automation |
 | 2026-10-22 | minor | M17: HarmonyOS platform services — the system file picker (open, save) and the clipboard (text, HTML, pictures) through a Rust→ArkTS bridge, with sandbox working copies because a picker grants a file and not its folder; open → edit → save → reopen verified on the emulator; a Ctrl/Meta chord no longer types the platform's key text |
 | 2026-10-18 | trivial | M6: Manage Sources imports Word's `Sources.xml` (#2640) |
 | 2026-10-12 | minor | Czech proofing review: short-word splits rank after deletion, NOSUGGEST excludes suggestions while accepting typed forms, affix comments apply only to headers, ratios keep spaces and repeated-word messages use Czech quotes; synthetic engine end-to-end and latency checks |

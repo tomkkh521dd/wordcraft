@@ -22,6 +22,13 @@ export const focus: (focused: boolean) => void;
 
 /** 1 when a frame was presented. */
 export const render: () => number;
+/** Scale the page view by `factor` (a pinch; 1.0 changes nothing). */
+export const zoom: (factor: number) => void;
+/** Continue a scroll after the fingers lift: release velocity in vp/s, positive = scrolling down. */
+export const scrollFling: (vx: number, vy: number) => void;
+/** 1 while a fling is still running. */
+export const flinging: () => number;
+
 /** The input method's composing text: drawn at the caret until the commit replaces it. */
 export const imePreview: (text: string) => void;
 /** The input method's committed text: one undoable insert. */

@@ -185,6 +185,27 @@ pub unsafe extern "C" fn wc_ime_commit(text: *const u8, len: usize) {
     }
 }
 
+// --- touch gestures: a pinch and a fling ---------------------------------------------------
+
+/// Scale the page view by `factor` (a pinch; 1.0 changes nothing).
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_zoom(factor: f32) {
+    with((), |app| app.zoom_by(factor));
+}
+
+/// Start a fling with the release velocity of a two-finger scroll, in points per second (positive
+/// = scrolling down and right).
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_scroll_fling(vx: f32, vy: f32) {
+    with((), |app| app.fling(vx, vy));
+}
+
+/// `1` while a fling is still running.
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_flinging() -> i32 {
+    with(0, |app| i32::from(app.flinging()))
+}
+
 // --- the text caret, for the platform's input method -------------------------------------------
 
 /// `1` when the document is editing text (a caret is on screen), `0` otherwise.

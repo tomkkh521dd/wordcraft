@@ -1,6 +1,6 @@
 # HarmonyOS (鸿蒙) platform
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
+> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (touch first: pinch zoom, two-finger scroll with momentum and a long-press context menu, read from the touch stream because the platform's recognisers hide it from the page; previously trivial (rasteriser: whole-row 1:1 blits and per-row edge stepping — a full frame paints in 36.8 ms on the tablet instead of 46.2, with `cargo run -p wordcraft-ui-paint --release --example bench` printing the cases; previously minor: OHOS.5b: IME commits are one undo step and preview text is drawn at the caret when an IME sends it — the Huawei IME does not, so composing stays in its bubble; previously minor: OHOS.5a: the system input method is bound to the self-drawn canvas — soft keyboard, English and 拼音 text, Backspace/Enter/arrows, candidate window at the caret; previously minor: a real HarmonyOS 6.1 tablet: the UI at 2.25×, the picker and the clipboard verified there too, including a paste of another app's copy without the restricted clipboard permission; only keys that can type carry a character, since injected keys bring garbage `keyText`; the working copy takes the name the user typed; previously minor: the real UI runs on the device, the CJK interface face and the icon glyphs are fixed, and the frame rate is the open problem; previously minor: first frame verified on the emulator: format, stride, density, input, engine; `mmap` for the buffer, and the uninstall a changed signature needs; previously trivial: signing; previously minor: step 2, HAP project, C++ shell and test pattern; previously major: first version) · **Target:** HarmonyOS NEXT 5.1+ (API 24, built against API 26), PC/2in1 and tablet
 
 WordCraft builds for HarmonyOS NEXT on `aarch64-unknown-linux-ohos` (devices) and
 `x86_64-unknown-linux-ohos` (the DevEco emulators). This page says what works, what doesn't,
@@ -17,6 +17,7 @@ files the port touches**.
 | The document UI (egui) on the surface | ✅ done: ribbon, ruler, pages, tables, lists, status bar |
 | Platform services: system font folders, locale, dark mode | ✅ done |
 | Platform services: file picker (open, save), clipboard (text, HTML, pictures) | ✅ done and verified on the emulator (see *Platform services*) |
+| Touch: pinch zoom, two-finger scroll with momentum, long-press context menu, drag selection | ✅ first version (OHOS.8a): pinch scales the page (`view.zoom`, 10–500%), two-finger pan scrolls and flings, a still finger opens the document's context menu; selection handles are next |
 | Input method (soft keyboard, Chinese IME, candidate window) | ✅ first version (OHOS.5a/b): attach, commit (one undo step), delete, Enter, cursor moves; the candidate window at the caret; the composing text stays in the keyboard's own bubble (the platform sends no preview text to self-drawn clients) |
 | Packaging (signed HAP), AppGallery | ⏳ planned (OHOS.6) |
 
@@ -222,6 +223,9 @@ HUAWEI BKY-W00, HarmonyOS 6.1.0.135 (API 24), 1840×2650 at 2.25×, 703 system f
 | IME keys | Backspace arrived as `deleteLeft` and inserted two `2055` key presses; `完成` (Done) arrived as `sendFunctionKey` and inserted `Enter` (`2054`) |
 | IME commit | every commit arrives as one `insertText` and becomes one `ImeEvent::Commit`: typing `M`, `o` and 拼音 `mo` → 么 logged `ime commit "M"`, `"o"`, `"么"` and the document reads `Why share a studio?Mo 么` — one undo step per commit, not one per character |
 | IME composing text | typing 拼音 `mo` showed the candidates 么 摸 万 … and the letters only in the keyboard's own bubble: `setPreviewText` never fired (subscribed before `attach`, as the API requires) |
+| Long press | a still finger for 600 ms opened the document's context menu (`pointer down secondary` at the finger, menu with 剪切/复制/粘贴/字体…); the trailing lift is swallowed so the menu stays open |
+| Drag selection | `uitest swipe` (which moves like a finger) reached the page as 33 pointer moves and selected the heading under it, with the mini toolbar above |
+| Injected `uitest drag` | sends no intermediate moves on this firmware, so it looks like a 900 ms long press; use `swipe` for scripted drags |
 
 A real device adds one finding the emulator hid: **`keyText` is unreliable for injected and
 chorded keys in general**, not only for modifiers — an F11 carried the text `K`. Text is accepted
@@ -257,6 +261,14 @@ Two things only a device shows, both handled:
   carry a character at all. ArkUI's `keyText` cannot be trusted for chords or injected keys
   (Ctrl+S and an injected F11 both arrived as `K`), and a shortcut that types would corrupt the
   document. Input-method text has its own entry (`wc_text`).
+- **Touch.** Pinch, two-finger scroll and the long-press menu are read from `TouchEvent.touches`
+  rather than the platform's `PinchGesture`/`PanGesture`: once one of those recognisers is attached
+  to the `XComponent`, ArkUI withholds the single-finger stream from `onTouch` while it decides,
+  and a slow drag then looks exactly like a press (measured: the context menu opened in the middle
+  of a selection drag, and the drag never reached the page). Two fingers cancel whatever the first
+  one started (`POINTER_CANCEL`) and drive zoom (`wc_zoom` → `view.zoom`) and scroll/`wc_scroll_fling`
+  (velocity decays per frame in Rust, and a touch stops it). The long press is a 600 ms timer on the
+  same single-finger stream, so a drag cancels it the moment it moves 8 vp.
 - **Input method.** The document is a self-drawn canvas, so the platform's text components never
   see a tap and no keyboard would appear. ArkTS binds the canvas to the input method itself
   (`inputMethod.getController().attach(...)`) whenever a tap leaves a caret (`wc_caret_present`,
@@ -289,6 +301,11 @@ Two things only a device shows, both handled:
   ms). Text sampling (bilinear per glyph pixel) and repainting only the damaged part of a frame
   are the next work; `cargo run -p wordcraft-ui-paint --release --example bench` prints the
   per-case numbers.
+- Touch, what is still missing: selection handles with edge auto-scroll (the caret can only be
+  moved by tapping, and a selection cannot be adjusted without re-dragging), a pinch that keeps
+  the point under the fingers fixed (the view zooms around its own centre), momentum friction that
+  is tuned on hardware, and the system Back key, which should close a menu instead of leaving the
+  app.
 - Input method, what is still missing: the Huawei IME (6.1.0) sends no preview text to a
   self-drawn client, so the composing letters are shown only by the keyboard's own bubble rather
   than inside the page (the `Preedit` path is wired and draws them if an IME does send them); a
@@ -315,6 +332,7 @@ Two things only a device shows, both handled:
 
 | Date | Kind | Change |
 |---|---|---|
+| 2026-10-22 | minor | OHOS.8a touch first: a two-finger pinch zooms the page (10–500%, one `view.zoom` step per gesture update), a two-finger pan scrolls with per-frame momentum, and a still finger opens the document's context menu; the platform's own gesture recognisers are not used, because they withhold the single-finger stream and a slow drag then reads as a long press (measured on the tablet) |
 | 2026-10-22 | trivial | Rasteriser: the 1:1 blit copies whole texture rows when the source is contiguous (12.6 → 4.2 ms per 4.9 MP frame in the new `crates/ui-paint/examples/bench.rs`), and the general triangle path evaluates each edge function once per row and steps it per pixel (8000 glyph quads 50 → 38 ms); a full UI frame on the tablet paints in 36.8 ms instead of 46.2 |
 | 2026-10-22 | minor | OHOS.5b: IME text arrives as one `ImeEvent::Commit` per commit (one undo step) and preview text as `ImeEvent::Preedit`, drawn at the caret by the desktop path; the Huawei IME on 6.1.0 sends no preview text to self-drawn clients, so composing letters stay in the keyboard's bubble |
 | 2026-10-22 | minor | OHOS.5a: the system input method is bound to the self-drawn canvas — a tap brings up the soft keyboard at the caret, English and Chinese (拼音 candidate) text land in the document, Backspace/Delete/Enter/arrow moves are wired, the candidate window follows the caret; composing text is not yet drawn inline |

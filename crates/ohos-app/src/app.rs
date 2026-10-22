@@ -80,6 +80,10 @@ pub struct App {
     caret: Option<egui::Pos2>,
     /// The height of the caret's line, in points.
     caret_height: f32,
+    /// A fling still in progress (points per second, positive = scrolling down and right), and the
+    /// time it was last advanced.
+    fling: (f32, f32),
+    last_frame: Option<Instant>,
 }
 
 impl App {
@@ -121,6 +125,8 @@ impl App {
             damage: None,
             caret: None,
             caret_height: 0.0,
+            fling: (0.0, 0.0),
+            last_frame: None,
             config,
             notes,
         };
@@ -143,6 +149,11 @@ impl App {
 
     pub fn frames(&self) -> u64 {
         self.frames
+    }
+
+    /// The page view's zoom (1.0 = 100%), for tests and for the shell's logs.
+    pub fn zoom(&self) -> f32 {
+        self.ui.session.view.zoom
     }
 
     /// Where the text caret is in points (x, y) and how tall its line is, for the platform's input
@@ -257,6 +268,10 @@ impl App {
     pub fn pointer(&mut self, kind: PointerKind, x: f32, y: f32, button: Button, mods: i32) {
         let pos = Pos2::new(sane(x), sane(y));
         self.modifiers_state = modifiers::egui(mods);
+        if kind == PointerKind::Down {
+            // Touching the page stops a fling, the way it stops a scroll on paper.
+            self.fling = (0.0, 0.0);
+        }
         match kind {
             PointerKind::Down => {
                 self.pointer = Some(pos);
@@ -290,6 +305,66 @@ impl App {
             if mods.is_empty() { "" } else { " " },
             mods
         ));
+    }
+
+    /// Scale the page view by `factor` (a pinch: 1.0 changes nothing), clamped to the zoom range the
+    /// View tab offers. The caret, the selection and everything else stay where they are; only the
+    /// drawing scale changes.
+    pub fn zoom_by(&mut self, factor: f32) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        // `view.zoom` takes a percentage and clamps to 10–500%.
+        let current = self.ui.session.view.zoom;
+        let target = (current * factor).clamp(0.1, 5.0);
+        if (target - current).abs() < 1.0e-4 {
+            return;
+        }
+        let _ = self.ui.run("view.zoom", serde_json::json!({"value": target * 100.0}));
+        self.count(format!("zoom {:.0}%", target * 100.0));
+    }
+
+    /// Start a fling from a gesture's release velocity (points per second, positive = scrolling
+    /// down and right). It decays every frame until it stops or the page is touched.
+    pub fn fling(&mut self, vx: f32, vy: f32) {
+        let clamp = |v: f32| if v.is_finite() { v.clamp(-8000.0, 8000.0) } else { 0.0 };
+        let (vx, vy) = (clamp(vx), clamp(vy));
+        // A hand that let go while barely moving is not a fling.
+        self.fling = if vx.abs() + vy.abs() < 200.0 { (0.0, 0.0) } else { (vx, vy) };
+        self.last_frame = None;
+    }
+
+    /// Whether a fling is running (the shell keeps drawing frames while it is).
+    pub fn flinging(&self) -> bool {
+        self.fling.0 != 0.0 || self.fling.1 != 0.0
+    }
+
+    /// Advance a running fling by the time since the last frame: one wheel event per frame, with
+    /// the velocity decaying, so the page comes to rest like a finger's throw.
+    fn advance_fling(&mut self) {
+        if !self.flinging() {
+            return;
+        }
+        let now = Instant::now();
+        let dt = self.last_frame.map_or(1.0 / 60.0, |last| now.duration_since(last).as_secs_f32().clamp(0.0, 0.05));
+        self.last_frame = Some(now);
+        let (vx, vy) = self.fling;
+        let (dx, dy) = (vx * dt, vy * dt);
+        if dx.abs() + dy.abs() >= 0.01 {
+            self.scrolled = (self.scrolled.0 + dx, self.scrolled.1 + dy);
+            self.raw.events.push(Event::MouseWheel {
+                unit: MouseWheelUnit::Point,
+                delta: vec2(dx, dy),
+                phase: TouchPhase::Move,
+                modifiers: self.modifiers_state,
+            });
+        }
+        // Exponential decay, the way a scroller settles (about a second and a half from a fast throw).
+        let decay = 1000.0_f32.powf(-dt / 0.25);
+        self.fling = (vx * decay, vy * decay);
+        if self.fling.0.abs() + self.fling.1.abs() < 30.0 {
+            self.fling = (0.0, 0.0);
+        }
     }
 
     /// A scroll gesture in vp, positive down and right (ArkUI's axis sign; egui's wheel is the
@@ -391,6 +466,7 @@ impl App {
             }
         }
 
+        self.advance_fling();
         let raw = self.take_raw_input();
         let had_input = !raw.events.is_empty();
         let ctx = self.ctx.clone();

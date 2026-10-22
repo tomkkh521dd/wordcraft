@@ -185,6 +185,13 @@ pub unsafe extern "C" fn wc_ime_commit(text: *const u8, len: usize) {
     }
 }
 
+/// The shell's side of the host bridge is ready (the page is showing): ask it whether a document
+/// should be opened (an "open with" URI, or the one that was open last time).
+#[unsafe(no_mangle)]
+pub extern "C" fn wc_ready() {
+    with((), |app| app.ask_startup_document());
+}
+
 // --- the document's file ---------------------------------------------------------------------
 
 thread_local! {

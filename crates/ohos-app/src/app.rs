@@ -129,7 +129,7 @@ impl App {
             caret: None,
             caret_height: 0.0,
             fling: (0.0, 0.0),
-            startup: Some(crate::services::startup_document()),
+            startup: None,
             last_frame: None,
             config,
             notes,
@@ -467,8 +467,16 @@ impl App {
         self.last = what;
     }
 
-    /// Open the document the platform offered at launch, once it arrives (an "open with" URI from
-    /// another app, or the document that was open when the app was last closed).
+    /// Ask the platform for the document to open at launch (an "open with" URI from another app,
+    /// or the document that was open when the app was last closed). The shell calls this once its
+    /// bridge is ready, so nothing is queued before there is someone to answer.
+    pub fn ask_startup_document(&mut self) {
+        if self.startup.is_none() {
+            self.startup = Some(crate::services::startup_document());
+        }
+    }
+
+    /// Open the document the platform offered at launch, once it arrives.
     fn take_startup_document(&mut self) {
         let Some(receiver) = self.startup.as_ref() else { return };
         let reply = match receiver.try_recv() {

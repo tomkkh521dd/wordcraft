@@ -280,6 +280,7 @@ struct Index {
     if (launch !== undefined && launch !== '') {
       this.launchUri = launch;
     }
+    // `loadState` tells the app when it is ready: it has to know the last document first.
     this.loadState(context);
     this.startFrames();
     // Save, export and Print-to-PDF all write into the sandbox; this puts the result where the
@@ -725,6 +726,7 @@ struct Index {
   /** Load the last document and the sandbox-path → picked-URI table, and re-activate the grants. */
   private async loadState(context: common.UIAbilityContext): Promise<void> {
     if (context === undefined) {
+      native.ready();
       return;
     }
     try {
@@ -755,6 +757,8 @@ struct Index {
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'no saved state: %{public}s', JSON.stringify(err));
     }
+    // Only now does the app know what was open last time: let it ask for that document.
+    native.ready();
   }
 
   /** Remember the sandbox-path → picked-URI table (so saves still reach the user's file). */

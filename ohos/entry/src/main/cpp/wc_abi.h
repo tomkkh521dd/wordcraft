@@ -47,6 +47,10 @@ void wc_ime_preview(const uint8_t *text, size_t len);
 /* The committed text (UTF-8, borrowed for this call): one undoable insert. */
 void wc_ime_commit(const uint8_t *text, size_t len);
 
+/* The page is up: ask the shell whether a document should be opened (an "open with" URI, or the
+ * one that was open last time). */
+void wc_ready(void);
+
 /* --- the document's file ------------------------------------------------------------------ */
 
 /* The document's path (UTF-8), or null; call wc_document_path_len() *after* this, and use the bytes

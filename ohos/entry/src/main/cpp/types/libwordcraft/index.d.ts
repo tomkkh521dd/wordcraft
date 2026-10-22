@@ -22,6 +22,8 @@ export const focus: (focused: boolean) => void;
 
 /** 1 when a frame was presented. */
 export const render: () => number;
+/** The page is up: ask the shell for a document to open (an "open with" URI, or last time's). */
+export const ready: () => void;
 /** The current document's sandbox path, or '' when nothing is open. */
 export const documentPath: () => string;
 /** Scale the page view by `factor` (a pinch; 1.0 changes nothing). */

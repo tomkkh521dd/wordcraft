@@ -269,7 +269,8 @@ Two things only a device shows, both handled:
   `ohos.permission.FILE_ACCESS_PERSIST` — normal and system-granted, though AppGallery wants the
   restricted-permission declaration at release), the sandbox ↔ URI table and the open document go
   into `preferences`, and the next launch re-activates the grants (`fileShare.activatePermission`)
-  before the page asks the app to open the remembered document. Without that, a save after a
+  before the page asks the app to open the remembered document (the page calls `wc_ready` only
+  after that state is loaded, or a cold start would race the answer and open nothing). Without that, a save after a
   restart wrote only the sandbox copy and the user's file silently went stale.
 - **Files.** User documents come from `DocumentViewPicker` and are edited through working copies
   in `filesDir/documents/` (see *Files: the picker grants a file, not its folder*). The engine

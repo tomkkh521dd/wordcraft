@@ -318,6 +318,14 @@ napi_value Text(napi_env env, napi_callback_info info) {
     return Undefined(env);
 }
 
+/* ready(): the page is up; ask for a document to open at launch */
+napi_value Ready(napi_env env, napi_callback_info info) {
+    (void)env;
+    (void)info;
+    wc_ready();
+    return Undefined(env);
+}
+
 /* documentPath() -> the current document's path, or '' */
 napi_value DocumentPath(napi_env env, napi_callback_info info) {
     (void)info;
@@ -540,6 +548,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"focus", nullptr, Focus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, Render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"ready", nullptr, Ready, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"documentPath", nullptr, DocumentPath, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"zoom", nullptr, Zoom, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"scrollFling", nullptr, ScrollFling, nullptr, nullptr, nullptr, napi_default, nullptr},
